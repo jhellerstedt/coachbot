@@ -1,0 +1,66 @@
+{
+  "id": "pyramid-1k-2k-2k-1k",
+  "name": "Pyramid 1k\u20132k\u20132k\u20131k",
+  "source": "curated",
+  "approved_at": null,
+  "tags": {
+    "phase": [
+      "build",
+      "peak"
+    ],
+    "zones": [
+      "Z4",
+      "T6"
+    ],
+    "session_subtype": "intervals",
+    "day_role": [
+      "tuesday",
+      "thursday"
+    ],
+    "total_minutes": 42
+  },
+  "rowing": {
+    "segments": [
+      {
+        "phase": "warm_up",
+        "label": "Warm-up",
+        "duration": "8 min",
+        "split_min": "2:15",
+        "split_max": "2:25",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 120,
+        "hr_bpm_max": 140,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "main_set",
+        "label": "1\u00d71000 m / 1\u00d72000 m / 1\u00d72000 m / 1\u00d71000 m / 3 min rest",
+        "duration": "1\u00d71000 m / 1\u00d72000 m / 1\u00d72000 m / 1\u00d71000 m / 3 min rest",
+        "split_min": "1:54",
+        "split_max": "2:02",
+        "zone_z": "Z4",
+        "zone_t": "T6",
+        "hr_bpm_min": 164,
+        "hr_bpm_max": 180,
+        "priority": "hr",
+        "notes": "1k pieces are faster end of range; 2k pieces are easier end"
+      },
+      {
+        "phase": "cool_down",
+        "label": "Cool-down",
+        "duration": "8 min",
+        "split_min": "2:20",
+        "split_max": "2:30",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 118,
+        "hr_bpm_max": 135,
+        "priority": "hr",
+        "notes": null
+      }
+    ],
+    "erg_alternative": null
+  }
+}

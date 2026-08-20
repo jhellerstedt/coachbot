@@ -1259,13 +1259,12 @@ def _estimate_segment_meters(duration: Optional[str]) -> int:
     if not duration:
         return 0
     text = duration.strip()
-    km = _DURATION_DIST_KM_RE.search(text)
-    if km:
-        return int(round(float(km.group(2)) * 1000 * int(km.group(1))))
-    m = _DURATION_DIST_M_RE.search(text)
-    if not m:
-        return 0
-    return int(m.group(1)) * int(m.group(2))
+    total = 0
+    for reps, km in _DURATION_DIST_KM_RE.findall(text):
+        total += int(round(float(km) * 1000 * int(reps)))
+    for reps, meters in _DURATION_DIST_M_RE.findall(text):
+        total += int(reps) * int(meters)
+    return total
 
 
 def _segment_specifies_rest(seg: RowingSegment) -> bool:

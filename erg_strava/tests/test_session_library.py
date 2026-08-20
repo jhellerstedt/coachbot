@@ -10,15 +10,32 @@ from session_library import (
     select_sessions_for_week,
     validate_session_template,
 )
+from weekly_plan_schema import SESSION_CAP_MINUTES
 
 
 def test_curated_sessions_validate():
     ensure_curated_seed_files()
     sessions = load_all_sessions()
     assert len(sessions) >= 12
+    ids = {template.id for template in sessions}
+    for sid in (
+        "vo2-8x500",
+        "threshold-3x10",
+        "z2-30-continuous",
+        "vo2-6x3min",
+        "anaerobic-10x1min",
+        "z3-2x15",
+        "threshold-4x2k",
+        "pyramid-1k-2k-2k-1k",
+    ):
+        assert sid in ids
     for template in sessions:
         err = validate_session_template(template)
-        assert err is None, f"{template.id}: {err}"
+        if template.total_minutes > SESSION_CAP_MINUTES:
+            assert err is not None
+            assert "cap" in err, f"{template.id}: expected cap error, got {err}"
+        else:
+            assert err is None, f"{template.id}: {err}"
 
 
 def test_select_sessions_for_week_picks_two_different():

@@ -385,6 +385,12 @@ def test_estimate_segment_minutes_distance_vs_duration():
     assert _estimate_segment_minutes("3x1000m") == 13
     assert _estimate_segment_minutes("4×500 m") == 9
     assert _estimate_segment_minutes("5×1 km") == 22
+    assert (
+        _estimate_segment_minutes(
+            "1×1000 m / 1×2000 m / 1×2000 m / 1×1000 m / 3 min rest"
+        )
+        == 26
+    )
 
 
 def test_validate_athlete_must_match_squad_gym_exercises():

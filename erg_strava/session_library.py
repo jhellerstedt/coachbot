@@ -68,6 +68,7 @@ def _seg(
     hr_min: int,
     hr_max: int,
     priority: str = "hr",
+    notes: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "phase": phase,
@@ -80,7 +81,7 @@ def _seg(
         "hr_bpm_min": hr_min,
         "hr_bpm_max": hr_max,
         "priority": priority,
-        "notes": None,
+        "notes": notes,
     }
 
 
@@ -155,6 +156,19 @@ CURATED_SEED: List[Dict[str, Any]] = [
         ],
     ),
     _session(
+        "z2-30-continuous",
+        "30 min continuous aerobic",
+        session_subtype="steady-state",
+        phases=["base", "build"],
+        day_roles=[DAY_ROLE_TUESDAY, DAY_ROLE_THURSDAY],
+        zones=["Z2", "T3"],
+        segments=[
+            _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
+            _seg("main_set", "Aerobic steady-state", "30 min", zone_z="Z2", zone_t="T3", split_min="2:08", split_max="2:18", hr_min=128, hr_max=145),
+            _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
+        ],
+    ),
+    _session(
         "z3-3x8",
         "3×8 min UT1",
         session_subtype="intervals",
@@ -177,6 +191,19 @@ CURATED_SEED: List[Dict[str, Any]] = [
         segments=[
             _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
             _seg("main_set", "2×10 min / 2 min rest", "2×10 min / 2 min rest", zone_z="Z3", zone_t="T5", split_min="2:02", split_max="2:10", hr_min=148, hr_max=165),
+            _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
+        ],
+    ),
+    _session(
+        "z3-2x15",
+        "2×15 min UT1",
+        session_subtype="intervals",
+        phases=["base", "build"],
+        day_roles=[DAY_ROLE_THURSDAY],
+        zones=["Z3", "T5"],
+        segments=[
+            _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
+            _seg("main_set", "2×15 min / 3 min rest", "2×15 min / 3 min rest", zone_z="Z3", zone_t="T5", split_min="2:00", split_max="2:08", hr_min=145, hr_max=162),
             _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
         ],
     ),
@@ -220,6 +247,32 @@ CURATED_SEED: List[Dict[str, Any]] = [
         ],
     ),
     _session(
+        "threshold-3x10",
+        "3×10 min threshold",
+        session_subtype="threshold",
+        phases=["build", "peak"],
+        day_roles=[DAY_ROLE_THURSDAY],
+        zones=["Z4", "T6"],
+        segments=[
+            _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
+            _seg("main_set", "3×10 min / 3 min rest", "3×10 min / 3 min rest", zone_z="Z4", zone_t="T6", split_min="1:55", split_max="2:02", hr_min=165, hr_max=178),
+            _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
+        ],
+    ),
+    _session(
+        "threshold-4x2k",
+        "4×2000 m threshold",
+        session_subtype="threshold",
+        phases=["build", "peak"],
+        day_roles=[DAY_ROLE_THURSDAY],
+        zones=["Z4", "T6"],
+        segments=[
+            _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
+            _seg("main_set", "4×2000 m / 3 min rest", "4×2000 m / 3 min rest", zone_z="Z4", zone_t="T6", split_min="1:57", split_max="2:03", hr_min=165, hr_max=178),
+            _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
+        ],
+    ),
+    _session(
         "vo2-6x500",
         "6×500 m VO2",
         session_subtype="vo2",
@@ -242,6 +295,32 @@ CURATED_SEED: List[Dict[str, Any]] = [
         segments=[
             _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
             _seg("main_set", "5×500 m / 3 min rest", "5×500 m / 3 min rest", zone_z="Z5", zone_t="T7", split_min="1:43", split_max="1:49", hr_min=174, hr_max=188, priority="split"),
+            _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
+        ],
+    ),
+    _session(
+        "vo2-8x500",
+        "8×500 m VO2",
+        session_subtype="vo2",
+        phases=["build", "peak"],
+        day_roles=[DAY_ROLE_TUESDAY],
+        zones=["Z5", "T7"],
+        segments=[
+            _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
+            _seg("main_set", "8×500 m / 2 min rest", "8×500 m / 2 min rest", zone_z="Z5", zone_t="T7", split_min="1:43", split_max="1:49", hr_min=174, hr_max=188, priority="split"),
+            _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
+        ],
+    ),
+    _session(
+        "vo2-6x3min",
+        "6×3 min VO2",
+        session_subtype="vo2",
+        phases=["build", "peak"],
+        day_roles=[DAY_ROLE_TUESDAY],
+        zones=["Z5", "T7"],
+        segments=[
+            _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
+            _seg("main_set", "6×3 min / 3 min rest", "6×3 min / 3 min rest", zone_z="Z5", zone_t="T7", split_min="1:47", split_max="1:53", hr_min=174, hr_max=188, priority="split"),
             _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
         ],
     ),
@@ -294,6 +373,43 @@ CURATED_SEED: List[Dict[str, Any]] = [
         segments=[
             _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
             _seg("main_set", "4×3 min / 3 min rest", "4×3 min / 3 min rest", zone_z="Z5", zone_t="T7", split_min="1:48", split_max="1:54", hr_min=178, hr_max=192, priority="split"),
+            _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
+        ],
+    ),
+    _session(
+        "anaerobic-10x1min",
+        "10×1 min anaerobic",
+        session_subtype="intervals",
+        phases=["peak"],
+        day_roles=[DAY_ROLE_TUESDAY],
+        zones=["Z5", "T7"],
+        segments=[
+            _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
+            _seg("main_set", "10×1 min / 1 min rest", "10×1 min / 1 min rest", zone_z="Z5", zone_t="T7", split_min="1:40", split_max="1:46", hr_min=178, hr_max=192, priority="split"),
+            _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
+        ],
+    ),
+    _session(
+        "pyramid-1k-2k-2k-1k",
+        "Pyramid 1k–2k–2k–1k",
+        session_subtype="intervals",
+        phases=["build", "peak"],
+        day_roles=[DAY_ROLE_TUESDAY, DAY_ROLE_THURSDAY],
+        zones=["Z4", "T6"],
+        segments=[
+            _seg("warm_up", "Warm-up", "8 min", zone_z="Z2", zone_t="T2", split_min="2:15", split_max="2:25", hr_min=120, hr_max=140),
+            _seg(
+                "main_set",
+                "1×1000 m / 1×2000 m / 1×2000 m / 1×1000 m / 3 min rest",
+                "1×1000 m / 1×2000 m / 1×2000 m / 1×1000 m / 3 min rest",
+                zone_z="Z4",
+                zone_t="T6",
+                split_min="1:54",
+                split_max="2:02",
+                hr_min=164,
+                hr_max=180,
+                notes="1k pieces are faster end of range; 2k pieces are easier end",
+            ),
             _seg("cool_down", "Cool-down", "8 min", zone_z="Z2", zone_t="T2", split_min="2:20", split_max="2:30", hr_min=118, hr_max=135),
         ],
     ),

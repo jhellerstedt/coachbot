@@ -1,0 +1,64 @@
+{
+  "id": "anaerobic-10x1min",
+  "name": "10\u00d71 min anaerobic",
+  "source": "curated",
+  "approved_at": null,
+  "tags": {
+    "phase": [
+      "peak"
+    ],
+    "zones": [
+      "Z5",
+      "T7"
+    ],
+    "session_subtype": "intervals",
+    "day_role": [
+      "tuesday"
+    ],
+    "total_minutes": 26
+  },
+  "rowing": {
+    "segments": [
+      {
+        "phase": "warm_up",
+        "label": "Warm-up",
+        "duration": "8 min",
+        "split_min": "2:15",
+        "split_max": "2:25",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 120,
+        "hr_bpm_max": 140,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "main_set",
+        "label": "10\u00d71 min / 1 min rest",
+        "duration": "10\u00d71 min / 1 min rest",
+        "split_min": "1:40",
+        "split_max": "1:46",
+        "zone_z": "Z5",
+        "zone_t": "T7",
+        "hr_bpm_min": 178,
+        "hr_bpm_max": 192,
+        "priority": "split",
+        "notes": null
+      },
+      {
+        "phase": "cool_down",
+        "label": "Cool-down",
+        "duration": "8 min",
+        "split_min": "2:20",
+        "split_max": "2:30",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 118,
+        "hr_bpm_max": 135,
+        "priority": "hr",
+        "notes": null
+      }
+    ],
+    "erg_alternative": null
+  }
+}
