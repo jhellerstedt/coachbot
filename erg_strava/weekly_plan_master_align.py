@@ -812,12 +812,7 @@ def _enforce_session_duration_caps(
         )
     if spill_total > 0:
         days = _spill_rowing_minutes_to_weekend(days, spill_total, priority=priority)
-    return WeeklyPlan(
-        version=plan.version,
-        personalised=plan.personalised,
-        days=days,
-        greeting=plan.greeting,
-    )
+    return plan.with_days(days)
 
 
 def _ensure_gym_working_sets(gym: GymSession, phase: str) -> GymSession:
@@ -1032,12 +1027,7 @@ def repair_fixed_weekly_schedule(
         )
 
     return _enforce_session_duration_caps(
-        WeeklyPlan(
-            version=plan.version,
-            personalised=plan.personalised,
-            days=repaired,
-            greeting=plan.greeting,
-        ),
+        plan.with_days(repaired),
         priority=priority,
     )
 
@@ -1095,12 +1085,7 @@ def _ensure_modality(plan: WeeklyPlan, *, phase: str, priority: str) -> WeeklyPl
                 ),
                 notes="Added to meet base/deload aerobic volume",
             )
-    return WeeklyPlan(
-        version=plan.version,
-        personalised=plan.personalised,
-        days=days,
-        greeting=plan.greeting,
-    )
+    return plan.with_days(days)
 
 
 def _scale_rowing_volume(
@@ -1191,12 +1176,7 @@ def _scale_rowing_volume(
         )
     if spill_total > 0:
         days = _spill_rowing_minutes_to_weekend(days, spill_total, priority=priority)
-    return WeeklyPlan(
-        version=plan.version,
-        personalised=plan.personalised,
-        days=days,
-        greeting=plan.greeting,
-    )
+    return plan.with_days(days)
 
 
 def _apply_taper_volume(
@@ -1353,12 +1333,7 @@ def correct_weekly_plan(
             )
         )
 
-    corrected = WeeklyPlan(
-        version=plan.version,
-        personalised=plan.personalised,
-        days=days,
-        greeting=plan.greeting,
-    )
+    corrected = plan.with_days(days)
 
     if phase in _ON_WATER_PHASES:
         corrected = _ensure_modality(corrected, phase=phase, priority=priority)
@@ -1380,12 +1355,7 @@ def correct_weekly_plan(
             days = _spill_rowing_minutes_to_weekend(
                 list(corrected.days), need, priority=priority, min_spill=10
             )
-            corrected = WeeklyPlan(
-                version=corrected.version,
-                personalised=corrected.personalised,
-                days=days,
-                greeting=corrected.greeting,
-            )
+            corrected = corrected.with_days(days)
             corrected = _enforce_session_duration_caps(corrected, priority=priority)
 
     validation = validate_weekly_plan(week, corrected, weekly_targets)

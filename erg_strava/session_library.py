@@ -19,8 +19,11 @@ from weekly_plan_schema import (
     _parse_rowing_session,
     estimate_rowing_session_minutes,
     parse_weekly_plan,
+    personalize_recommended_erg,
     validate_plan_session_constraints,
+    validate_rowing_interval_rest,
     validate_rowing_warmup_cooldown_caps,
+    validate_rowing_zone_zt_compatibility,
     weekly_plan_to_dict,
 )
 
@@ -444,6 +447,14 @@ _THURSDAY_SUBTYPE_PREF: Dict[str, List[str]] = {
     "peak": ["steady-state", "threshold"],
 }
 
+_RECOMMENDED_SUBTYPE_PREF: Dict[str, List[str]] = {
+    "deload": ["steady-state"],
+    "recovery": ["steady-state"],
+    "base": ["steady-state", "intervals", "threshold"],
+    "build": ["threshold", "intervals", "vo2", "steady-state"],
+    "peak": ["threshold", "vo2", "intervals"],
+}
+
 
 def ensure_curated_seed_files() -> None:
     CURATED_DIR.mkdir(parents=True, exist_ok=True)
@@ -533,8 +544,12 @@ def _validation_plan_dict(template: ErgSessionTemplate, *, weekday: str = "Tuesd
     }
 
 
-def validate_session_template(template: ErgSessionTemplate) -> Optional[str]:
-    if template.total_minutes > SESSION_CAP_MINUTES:
+def validate_session_template(
+    template: ErgSessionTemplate,
+    *,
+    enforce_cap: bool = True,
+) -> Optional[str]:
+    if enforce_cap and template.total_minutes > SESSION_CAP_MINUTES:
         return f"session ~{template.total_minutes} min exceeds {SESSION_CAP_MINUTES} min cap"
     session = template.rowing_session()
     if session is None:
@@ -546,6 +561,21 @@ def validate_session_template(template: ErgSessionTemplate) -> Optional[str]:
             mins = _estimate_segment_minutes(seg.duration)
             if mins > WARMUP_COOLDOWN_CAP_MINUTES:
                 return f"{seg.phase} ~{mins} min exceeds {WARMUP_COOLDOWN_CAP_MINUTES} min cap"
+    if not enforce_cap:
+        day = DayPlan(
+            weekday="Tuesday",
+            date="2026-06-16",
+            session_type="erg",
+            session_subtype=template.session_subtype,
+            rowing=session,
+        )
+        rest_err = validate_rowing_interval_rest(day)
+        if rest_err:
+            return rest_err
+        zt_err = validate_rowing_zone_zt_compatibility(day)
+        if zt_err:
+            return zt_err
+        return None
     plan = parse_weekly_plan(_validation_plan_dict(template))
     if plan is None:
         return "plan parse failed"
@@ -590,6 +620,33 @@ def _pick_session(
     return ranked[0]
 
 
+def _pick_recommended_session(
+    candidates: Sequence[ErgSessionTemplate],
+    *,
+    exclude_ids: Sequence[str],
+    phase_key: str,
+) -> Optional[ErgSessionTemplate]:
+    prefs = _RECOMMENDED_SUBTYPE_PREF.get(phase_key, _RECOMMENDED_SUBTYPE_PREF["base"])
+    filtered = [
+        t
+        for t in candidates
+        if t.id not in exclude_ids
+        and validate_session_template(t, enforce_cap=False) is None
+    ]
+    if not filtered:
+        return None
+    ranked = sorted(
+        filtered,
+        key=lambda t: (
+            0 if t.total_minutes > SESSION_CAP_MINUTES else 1,
+            _subtype_rank(t, prefs),
+            -t.total_minutes,
+            t.id,
+        ),
+    )
+    return ranked[0]
+
+
 def select_sessions_for_week(
     *,
     phase: Optional[str] = None,
@@ -599,12 +656,14 @@ def select_sessions_for_week(
     phase_key = (phase or "base").strip().lower()
     recent = set(recent_session_ids or [])
     all_sessions = load_all_sessions(data_dir=data_dir)
+    phase_sessions = [t for t in all_sessions if _matches_phase(t, phase_key)]
     eligible = [
-        t for t in all_sessions if _matches_phase(t, phase_key) and validate_session_template(t) is None
+        t for t in phase_sessions if validate_session_template(t) is None
     ]
     if not eligible:
         ensure_curated_seed_files()
         eligible = load_all_sessions(data_dir=data_dir)
+        phase_sessions = eligible
 
     tuesday = _pick_session(
         [t for t in eligible if _matches_day_role(t, DAY_ROLE_TUESDAY)],
@@ -629,7 +688,16 @@ def select_sessions_for_week(
         fallback = eligible[0] if eligible else template_from_dict(CURATED_SEED[0])
         tuesday = tuesday or fallback
         thursday = thursday or fallback
-    return {"tuesday": tuesday, "thursday": thursday}
+    recommended_exclude = set(recent) | {tuesday.id, thursday.id}
+    recommended = _pick_recommended_session(
+        phase_sessions,
+        exclude_ids=list(recommended_exclude),
+        phase_key=phase_key,
+    )
+    out: Dict[str, ErgSessionTemplate] = {"tuesday": tuesday, "thursday": thursday}
+    if recommended is not None:
+        out["recommended"] = recommended
+    return out
 
 
 def recent_session_ids_from_plan(plan_json: Optional[Mapping[str, Any]]) -> List[str]:
@@ -639,7 +707,7 @@ def recent_session_ids_from_plan(plan_json: Optional[Mapping[str, Any]]) -> List
     if not isinstance(lib, dict):
         return []
     out: List[str] = []
-    for key in ("tuesday", "thursday"):
+    for key in ("tuesday", "thursday", "recommended"):
         val = lib.get(key)
         if val:
             out.append(str(val))
@@ -658,8 +726,13 @@ def format_session_library_prompt(selections: Mapping[str, ErgSessionTemplate]) 
     lines = [
         "\n\nSESSION LIBRARY (mandatory — use these exact session structures):\n",
         "Personalize splits, HR bpm, and zone labels only; do NOT change rep×duration/rest structure.\n",
+        "Do not put the recommended extra on Tuesday/Thursday or invent a Friday session; "
+        "it is attached after generation.\n",
     ]
-    for day_name, template in selections.items():
+    for day_name in ("tuesday", "thursday"):
+        template = selections.get(day_name)
+        if template is None:
+            continue
         weekday = "Tuesday" if day_name == "tuesday" else "Thursday"
         lines.append(f"- {weekday} MUST use library session `{template.id}` ({template.name}).")
         lines.append(f"  session_subtype: {template.session_subtype}")
@@ -668,6 +741,12 @@ def format_session_library_prompt(selections: Mapping[str, ErgSessionTemplate]) 
                 f"  - {seg.get('phase')}: {seg.get('label')} — {seg.get('duration')} "
                 f"({seg.get('zone_z')}/{seg.get('zone_t')})"
             )
+    recommended = selections.get("recommended")
+    if recommended is not None:
+        lines.append(
+            f"- Recommended extra (optional, not a calendar day) `{recommended.id}` "
+            f"({recommended.name}) will be attached after generation."
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -732,7 +811,60 @@ def apply_library_sessions_to_plan(
             )
             day["session_subtype"] = template.session_subtype
     out["session_library"] = {k: v.id for k, v in selections.items()}
+    recommended = selections.get("recommended")
+    if recommended is not None:
+        rowing = _parse_rowing_session(recommended.rowing)
+        if (
+            rowing is not None
+            and validate_session_template(recommended, enforce_cap=False) is None
+        ):
+            out["recommended_erg"] = {
+                "id": recommended.id,
+                "name": recommended.name,
+                "rowing": recommended.rowing,
+            }
+        else:
+            out.pop("recommended_erg", None)
+            lib = dict(out.get("session_library") or {})
+            lib.pop("recommended", None)
+            out["session_library"] = lib
     return out
+
+
+def copy_recommended_erg_from_squad(
+    plan_json: Dict[str, Any],
+    squad_plan_json: Mapping[str, Any],
+    *,
+    profile: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Copy squad recommended extra onto an athlete plan and overlay HR."""
+    from dataclasses import replace as dc_replace
+
+    squad = parse_weekly_plan(squad_plan_json)
+    if squad is None or squad.recommended_erg is None:
+        return plan_json
+    extra = squad.recommended_erg
+    if profile is not None:
+        extra = personalize_recommended_erg(extra, profile)
+    athlete = parse_weekly_plan(plan_json)
+    if athlete is None:
+        out = json.loads(json.dumps(plan_json))
+        out["recommended_erg"] = weekly_plan_to_dict(
+            dc_replace(squad, recommended_erg=extra)
+        )["recommended_erg"]
+        lib = dict(out.get("session_library") or {})
+        lib["recommended"] = extra.id
+        out["session_library"] = lib
+        return out
+    dumped = weekly_plan_to_dict(dc_replace(athlete, recommended_erg=extra))
+    lib = dict(plan_json.get("session_library") or {})
+    squad_lib = squad_plan_json.get("session_library")
+    if isinstance(squad_lib, dict) and squad_lib.get("recommended"):
+        lib["recommended"] = str(squad_lib["recommended"])
+    else:
+        lib["recommended"] = extra.id
+    dumped["session_library"] = lib
+    return dumped
 
 
 def promote_erg_score_to_library(

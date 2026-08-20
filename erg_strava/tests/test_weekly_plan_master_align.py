@@ -592,3 +592,16 @@ def test_enforce_session_cap_trims_oversized_steady_state():
     capped = _enforce_session_duration_caps(plan, priority="hr")
     thu_after = next(d for d in capped.days if d.weekday == "Thursday")
     assert estimate_rowing_session_minutes(thu_after.rowing) <= 45
+
+
+def test_enforce_session_cap_keeps_recommended_erg():
+    from weekly_plan_master_align import _enforce_session_duration_caps
+    from test_weekly_plan_schema import _recommended_erg_dict, sample_squad_plan_dict
+
+    data = sample_squad_plan_dict()
+    data["recommended_erg"] = _recommended_erg_dict()
+    plan = parse_weekly_plan(data)
+    assert plan is not None
+    capped = _enforce_session_duration_caps(plan, priority="hr")
+    assert capped.recommended_erg is not None
+    assert capped.recommended_erg.id == "z2-30-continuous"

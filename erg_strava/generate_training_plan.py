@@ -6143,20 +6143,29 @@ def generate_athlete_weekly_plan(
         athlete_profile=athlete_profile,
         prose_fallback=lambda: _call_llm(system, user, token),
     )
-    if generated.plan_json and squad_plan_json and include_lifting:
+    plan_json = generated.plan_json
+    if plan_json and squad_plan_json and include_lifting:
         from gym_program import load_program_from_plan, personalize_plan_gym_loads
-        from weekly_plan_schema import parse_weekly_plan, render_plan_text
 
-        patched = personalize_plan_gym_loads(
-            generated.plan_json,
+        plan_json = personalize_plan_gym_loads(
+            plan_json,
             squad_plan_json,
             lift_logs_by_exercise=lift_logs_by_exercise,
             program=load_program_from_plan(squad_plan_json),
         )
-        parsed = parse_weekly_plan(patched)
+    if plan_json and squad_plan_json:
+        from session_library import copy_recommended_erg_from_squad
+
+        plan_json = copy_recommended_erg_from_squad(
+            plan_json, squad_plan_json, profile=athlete_profile
+        )
+    if plan_json is not None and plan_json is not generated.plan_json:
+        from weekly_plan_schema import parse_weekly_plan, render_plan_text
+
+        parsed = parse_weekly_plan(plan_json)
         if parsed is not None:
             return GeneratedWeeklyPlan(
-                plan_json=patched,
+                plan_json=plan_json,
                 plan_text=render_plan_text(parsed, absolute_hr_bpm=False),
             )
     return generated

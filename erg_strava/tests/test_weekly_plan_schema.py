@@ -767,3 +767,97 @@ Ensure all athletes adhere to these session targets."""
     assert "Weekly Targets" not in cleaned
     assert "Monday:" in cleaned
     assert "Ensure all athletes" not in cleaned
+
+
+def _recommended_erg_dict(*, main_duration: str = "30 min") -> dict:
+    return {
+        "id": "z2-30-continuous",
+        "name": "30 min continuous aerobic",
+        "rowing": {
+            "segments": [
+                {**_erg_segment("warm_up", "Warm-up"), "duration": "8 min"},
+                {
+                    **_erg_segment("main_set", "Aerobic steady-state"),
+                    "duration": main_duration,
+                },
+                {**_erg_segment("cool_down", "Cool-down"), "duration": "8 min"},
+            ],
+            "erg_alternative": None,
+        },
+    }
+
+
+def test_recommended_erg_round_trips_parse_and_to_dict():
+    data = sample_squad_plan_dict()
+    data["recommended_erg"] = _recommended_erg_dict()
+    plan = parse_weekly_plan(data)
+    assert plan is not None
+    assert plan.recommended_erg is not None
+    assert plan.recommended_erg.id == "z2-30-continuous"
+    assert plan.recommended_erg.name == "30 min continuous aerobic"
+    dumped = weekly_plan_to_dict(plan)
+    assert dumped["recommended_erg"]["id"] == "z2-30-continuous"
+    again = parse_weekly_plan(dumped)
+    assert again is not None
+    assert again.recommended_erg is not None
+    assert again.recommended_erg.id == "z2-30-continuous"
+
+
+def test_malformed_recommended_erg_is_dropped():
+    data = sample_squad_plan_dict()
+    data["recommended_erg"] = {"id": "broken"}
+    plan = parse_weekly_plan(data)
+    assert plan is not None
+    assert plan.recommended_erg is None
+
+
+def test_render_plan_text_appends_recommended_extra_after_sunday():
+    data = sample_squad_plan_dict()
+    data["recommended_erg"] = _recommended_erg_dict()
+    plan = parse_weekly_plan(data)
+    assert plan is not None
+    text = render_plan_text(plan)
+    sunday_at = text.index("Sunday:")
+    extra_at = text.index("Recommended extra erg (Fri/Sat if you have time):")
+    assert extra_at > sunday_at
+    assert "30 min continuous aerobic" in text
+    friday = next(d for d in plan.days if d.weekday == "Friday")
+    assert friday.session_type == "rest"
+
+
+def test_prescribed_metrics_ignore_recommended_erg():
+    base = sample_squad_plan_dict()
+    with_extra = sample_squad_plan_dict()
+    with_extra["recommended_erg"] = _recommended_erg_dict()
+    base_metrics = planned_metrics_from_plan_json(base)
+    extra_metrics = planned_metrics_from_plan_json(with_extra)
+    assert extra_metrics["rowing_minutes"] == base_metrics["rowing_minutes"]
+
+
+def test_recommended_erg_over_cap_does_not_fail_plan_constraints():
+    data = sample_squad_plan_dict()
+    data["recommended_erg"] = _recommended_erg_dict(main_duration="40 min")
+    plan = parse_weekly_plan(data)
+    assert plan is not None
+    assert validate_plan_session_constraints(plan) is None
+
+
+def test_personalize_recommended_erg_rewrites_hr_keeps_splits():
+    from weekly_plan_schema import personalize_recommended_erg
+
+    data = sample_squad_plan_dict()
+    data["recommended_erg"] = _recommended_erg_dict()
+    plan = parse_weekly_plan(data)
+    assert plan is not None and plan.recommended_erg is not None
+    profile = AthleteProfile(id=1, label="Test", max_hr_bpm=200)
+    original_split = plan.recommended_erg.rowing.segments[1].split_min
+    original_hr = plan.recommended_erg.rowing.segments[1].hr_bpm_min
+    updated = personalize_recommended_erg(plan.recommended_erg, profile)
+    z2 = profile.zone_bpm_range("z2")
+    t3 = profile.zone_bpm_range("t3")
+    assert z2 and t3
+    main = updated.rowing.segments[1]
+    assert main.split_min == original_split
+    assert main.hr_bpm_min != original_hr
+    assert main.hr_bpm_min == t3[0]
+    assert main.hr_bpm_max == t3[1]

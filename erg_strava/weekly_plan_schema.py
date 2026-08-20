@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -171,11 +171,67 @@ class DayPlan:
 
 
 @dataclass
+class RecommendedErg:
+    id: str
+    name: str
+    rowing: RowingSession
+
+
+@dataclass
 class WeeklyPlan:
     version: int
     personalised: bool
     days: List[DayPlan]
     greeting: Optional[str] = None
+    recommended_erg: Optional["RecommendedErg"] = None
+
+    def with_days(self, days: List[DayPlan]) -> "WeeklyPlan":
+        return WeeklyPlan(
+            version=self.version,
+            personalised=self.personalised,
+            days=days,
+            greeting=self.greeting,
+            recommended_erg=self.recommended_erg,
+        )
+
+
+def _hr_range_for_segment(
+    seg: RowingSegment,
+    profile: AthleteProfile,
+) -> Optional[Tuple[int, int]]:
+    if seg.zone_t:
+        rng = profile.zone_bpm_range(seg.zone_t)
+        if rng:
+            return rng
+    if seg.zone_z:
+        return profile.zone_bpm_range(seg.zone_z)
+    return None
+
+
+def personalize_recommended_erg(
+    extra: RecommendedErg,
+    profile: AthleteProfile,
+) -> RecommendedErg:
+    """Rewrite extra-session HR from the athlete profile; keep splits."""
+
+    def overlay(seg: RowingSegment) -> RowingSegment:
+        rng = _hr_range_for_segment(seg, profile)
+        if rng is None:
+            return seg
+        return replace(seg, hr_bpm_min=rng[0], hr_bpm_max=rng[1])
+
+    alt = extra.rowing.erg_alternative
+    if alt is not None:
+        alt = replace(alt, segments=[overlay(s) for s in alt.segments])
+    return RecommendedErg(
+        id=extra.id,
+        name=extra.name,
+        rowing=replace(
+            extra.rowing,
+            segments=[overlay(s) for s in extra.rowing.segments],
+            erg_alternative=alt,
+        ),
+    )
 
 
 def _gym_set_schema() -> Dict[str, Any]:
@@ -752,12 +808,28 @@ def parse_weekly_plan(data: Any) -> Optional[WeeklyPlan]:
         if parsed is None:
             return None
         days.append(parsed)
+    extra = _parse_recommended_erg(data.get("recommended_erg"))
     return WeeklyPlan(
         version=version,
         personalised=personalised,
         days=days,
         greeting=greeting,
+        recommended_erg=extra,
     )
+
+
+def _parse_recommended_erg(raw: Any) -> Optional[RecommendedErg]:
+    if not isinstance(raw, Mapping):
+        return None
+    erg_id = str(raw.get("id") or "").strip()
+    name = str(raw.get("name") or "").strip()
+    rowing_raw = raw.get("rowing")
+    if not erg_id or not name or not isinstance(rowing_raw, Mapping):
+        return None
+    rowing = _parse_rowing_session(rowing_raw)
+    if rowing is None:
+        return None
+    return RecommendedErg(id=erg_id, name=name, rowing=rowing)
 
 
 def parse_weekly_plan_json(text: str) -> Optional[WeeklyPlan]:
@@ -816,7 +888,7 @@ def weekly_plan_to_dict(plan: WeeklyPlan) -> Dict[str, Any]:
             }
         return out
 
-    return {
+    out: Dict[str, Any] = {
         "version": plan.version,
         "personalised": plan.personalised,
         "greeting": plan.greeting,
@@ -832,7 +904,17 @@ def weekly_plan_to_dict(plan: WeeklyPlan) -> Dict[str, Any]:
             }
             for d in plan.days
         ],
+        "recommended_erg": (
+            {
+                "id": plan.recommended_erg.id,
+                "name": plan.recommended_erg.name,
+                "rowing": rowing_to_dict(plan.recommended_erg.rowing),
+            }
+            if plan.recommended_erg
+            else None
+        ),
     }
+    return out
 
 
 _LOW_INTENSITY_PLAN_PHASES = frozenset({"deload", "recovery", "taper"})
@@ -1153,6 +1235,16 @@ def render_plan_text(
         header = day.weekday + ":"
         body = render_day_text(day, absolute_hr_bpm=absolute_hr_bpm)
         lines.append(f"{header}\n{body}")
+        lines.append("")
+    extra = plan.recommended_erg
+    if extra is not None:
+        lines.append("Recommended extra erg (Fri/Sat if you have time):")
+        lines.append(extra.name)
+        lines.extend(
+            _format_rowing_session(
+                extra.rowing, on_water=False, absolute_hr_bpm=absolute_hr_bpm
+            )
+        )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
