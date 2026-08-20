@@ -1,0 +1,68 @@
+{
+  "id": "z2-steady-25",
+  "name": "25 min aerobic steady-state",
+  "source": "curated",
+  "approved_at": null,
+  "tags": {
+    "phase": [
+      "base",
+      "build",
+      "deload",
+      "recovery"
+    ],
+    "zones": [
+      "Z2",
+      "T3"
+    ],
+    "session_subtype": "steady-state",
+    "day_role": [
+      "tuesday",
+      "thursday"
+    ],
+    "total_minutes": 41
+  },
+  "rowing": {
+    "segments": [
+      {
+        "phase": "warm_up",
+        "label": "Warm-up",
+        "duration": "8 min",
+        "split_min": "2:15",
+        "split_max": "2:25",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 120,
+        "hr_bpm_max": 140,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "main_set",
+        "label": "Aerobic steady-state",
+        "duration": "25 min",
+        "split_min": "2:05",
+        "split_max": "2:15",
+        "zone_z": "Z2",
+        "zone_t": "T3",
+        "hr_bpm_min": 130,
+        "hr_bpm_max": 148,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "cool_down",
+        "label": "Cool-down",
+        "duration": "8 min",
+        "split_min": "2:20",
+        "split_max": "2:30",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 118,
+        "hr_bpm_max": 135,
+        "priority": "hr",
+        "notes": null
+      }
+    ],
+    "erg_alternative": null
+  }
+}

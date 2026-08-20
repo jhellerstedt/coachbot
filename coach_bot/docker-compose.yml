@@ -1,0 +1,24 @@
+services:
+  coach-bot:
+    build:
+      context: ..
+      dockerfile: coach_bot/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Match host user so erg_scores/cache files are writable by cron (georgemcfly).
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      CACHE_DIR: /data/cache
+      CONFIG_PATH: /app/config.yaml
+      ZULIPRC_PATH: /app/rrcc-zuliprc
+      ZULIP_STREAM: general
+      # ZULIP_TOPIC unset = all topics in the stream; set to e.g. project-640 to restrict
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
+      OPENROUTER_STRUCTURED_MODEL: ${OPENROUTER_STRUCTURED_MODEL:-openai/gpt-4o-mini}
+      OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-google/gemini-2.5-flash}
+    volumes:
+      - ../erg_strava/erg_strava_cache:/data/cache
+      - ../rrcc-zuliprc:/app/rrcc-zuliprc:ro
+      - ../erg_strava/config.yaml:/app/config.yaml:ro

@@ -1,0 +1,66 @@
+{
+  "id": "z2-3x8",
+  "name": "3\u00d78 min aerobic pieces",
+  "source": "curated",
+  "approved_at": null,
+  "tags": {
+    "phase": [
+      "base",
+      "build",
+      "deload"
+    ],
+    "zones": [
+      "Z2",
+      "T3"
+    ],
+    "session_subtype": "intervals",
+    "day_role": [
+      "thursday"
+    ],
+    "total_minutes": 40
+  },
+  "rowing": {
+    "segments": [
+      {
+        "phase": "warm_up",
+        "label": "Warm-up",
+        "duration": "8 min",
+        "split_min": "2:15",
+        "split_max": "2:25",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 120,
+        "hr_bpm_max": 140,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "main_set",
+        "label": "3\u00d78 min / 2 min rest",
+        "duration": "3\u00d78 min / 2 min rest",
+        "split_min": "2:06",
+        "split_max": "2:14",
+        "zone_z": "Z2",
+        "zone_t": "T3",
+        "hr_bpm_min": 135,
+        "hr_bpm_max": 152,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "cool_down",
+        "label": "Cool-down",
+        "duration": "8 min",
+        "split_min": "2:20",
+        "split_max": "2:30",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 118,
+        "hr_bpm_max": 135,
+        "priority": "hr",
+        "notes": null
+      }
+    ],
+    "erg_alternative": null
+  }
+}

@@ -1,0 +1,31 @@
+[project]
+name = "coachbot"
+version = "0.1.0"
+description = "Zulip rowing coach bot with weekly erg plan generation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.28",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+    "python-dateutil>=2.8",
+    "python-dotenv>=1.0",
+    "zulip>=0.8.2",
+    "matplotlib>=3.7",
+    "pyarrow>=14.0",
+    "fitparse>=1.2",
+    "stravalib>=1.5",
+    "Pillow>=10.0",
+    "seaborn>=0.13",
+    "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+coachbot-session = "session_library:main"
+
+[tool.pytest.ini_options]
+pythonpath = [".", "erg_strava", "lighties"]
+testpaths = ["erg_strava/tests", "coach_bot/tests"]

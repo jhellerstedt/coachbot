@@ -1,0 +1,65 @@
+{
+  "id": "vo2-5x500",
+  "name": "5\u00d7500 m VO2",
+  "source": "curated",
+  "approved_at": null,
+  "tags": {
+    "phase": [
+      "build",
+      "peak"
+    ],
+    "zones": [
+      "Z5",
+      "T7"
+    ],
+    "session_subtype": "vo2",
+    "day_role": [
+      "tuesday"
+    ],
+    "total_minutes": 27
+  },
+  "rowing": {
+    "segments": [
+      {
+        "phase": "warm_up",
+        "label": "Warm-up",
+        "duration": "8 min",
+        "split_min": "2:15",
+        "split_max": "2:25",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 120,
+        "hr_bpm_max": 140,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "main_set",
+        "label": "5\u00d7500 m / 3 min rest",
+        "duration": "5\u00d7500 m / 3 min rest",
+        "split_min": "1:43",
+        "split_max": "1:49",
+        "zone_z": "Z5",
+        "zone_t": "T7",
+        "hr_bpm_min": 174,
+        "hr_bpm_max": 188,
+        "priority": "split",
+        "notes": null
+      },
+      {
+        "phase": "cool_down",
+        "label": "Cool-down",
+        "duration": "8 min",
+        "split_min": "2:20",
+        "split_max": "2:30",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 118,
+        "hr_bpm_max": 135,
+        "priority": "hr",
+        "notes": null
+      }
+    ],
+    "erg_alternative": null
+  }
+}

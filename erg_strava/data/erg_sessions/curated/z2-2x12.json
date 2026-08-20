@@ -1,0 +1,66 @@
+{
+  "id": "z2-2x12",
+  "name": "2\u00d712 min aerobic intervals",
+  "source": "curated",
+  "approved_at": null,
+  "tags": {
+    "phase": [
+      "base",
+      "build",
+      "deload"
+    ],
+    "zones": [
+      "Z2",
+      "T3"
+    ],
+    "session_subtype": "steady-state",
+    "day_role": [
+      "thursday"
+    ],
+    "total_minutes": 40
+  },
+  "rowing": {
+    "segments": [
+      {
+        "phase": "warm_up",
+        "label": "Warm-up",
+        "duration": "8 min",
+        "split_min": "2:15",
+        "split_max": "2:25",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 120,
+        "hr_bpm_max": 140,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "main_set",
+        "label": "2\u00d712 min / 2 min rest",
+        "duration": "2\u00d712 min / 2 min rest",
+        "split_min": "2:05",
+        "split_max": "2:12",
+        "zone_z": "Z2",
+        "zone_t": "T3",
+        "hr_bpm_min": 132,
+        "hr_bpm_max": 150,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "cool_down",
+        "label": "Cool-down",
+        "duration": "8 min",
+        "split_min": "2:20",
+        "split_max": "2:30",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 118,
+        "hr_bpm_max": 135,
+        "priority": "hr",
+        "notes": null
+      }
+    ],
+    "erg_alternative": null
+  }
+}
