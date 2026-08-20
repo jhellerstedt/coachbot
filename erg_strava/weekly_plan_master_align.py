@@ -878,37 +878,15 @@ def _clone_rowing(rowing: RowingSession) -> RowingSession:
 
 
 def _template_leg_gym(*, phase: str) -> GymSession:
-    from weekly_plan_schema import GYM_CATEGORY_LEG
+    from gym_program import template_gym_session
 
-    exercises = [
-        GymExercise(name="Back squat", sets=[GymSet(8, 70.0, None)] * 3),
-        GymExercise(name="Romanian deadlift", sets=[GymSet(8, 60.0, None)] * 3),
-        GymExercise(name="Bulgarian split squat", sets=[GymSet(8, 30.0, None)] * 3),
-        GymExercise(name="Plank", sets=[GymSet(1, None, 30)] * 2),
-    ]
-    gym = GymSession(category=GYM_CATEGORY_LEG, goal="strength", exercises=exercises)
-    if phase == "deload":
-        from gym_deload import apply_deload_modifier, DeloadConfig
-
-        return apply_deload_modifier(gym, DeloadConfig(min_sets=2, max_sets=2))
-    return _ensure_gym_working_sets(gym, phase) if phase in ("base", "build") else gym
+    return template_gym_session("Monday", phase=phase)
 
 
 def _template_upper_gym(*, phase: str) -> GymSession:
-    from weekly_plan_schema import GYM_CATEGORY_UPPER_CORE
+    from gym_program import template_gym_session
 
-    exercises = [
-        GymExercise(name="Incline bench press", sets=[GymSet(8, 40.0, None)] * 3),
-        GymExercise(name="Barbell row", sets=[GymSet(8, 45.0, None)] * 3),
-        GymExercise(name="Lat pull-down", sets=[GymSet(8, 50.0, None)] * 3),
-        GymExercise(name="Russian twists", sets=[GymSet(20, 8.0, None)] * 2),
-    ]
-    gym = GymSession(category=GYM_CATEGORY_UPPER_CORE, goal="strength", exercises=exercises)
-    if phase == "deload":
-        from gym_deload import apply_deload_modifier, DeloadConfig
-
-        return apply_deload_modifier(gym, DeloadConfig(min_sets=2, max_sets=2))
-    return _ensure_gym_working_sets(gym, phase) if phase in ("base", "build") else gym
+    return template_gym_session("Wednesday", phase=phase)
 
 
 def _template_aerobic_rowing(*, priority: str, on_water: bool) -> RowingSession:
@@ -1615,6 +1593,9 @@ def enforce_weekly_plan_alignment(
         reference_plan=reference_plan,
     )
     plan_json = weekly_plan_to_dict(corrected_plan)
+    for key in ("session_library", "gym_program"):
+        if key in coach_bot_plan:
+            plan_json[key] = coach_bot_plan[key]
     had_violations = bool(before.violations)
     still_has_violations = bool(after.violations)
     return _alignment_result_from_plan(

@@ -172,6 +172,7 @@ def _generate_week(
             previous_week_gym_exercises=prev_gym,
             season_week_context=season_ctx,
             phase=phase,
+            prev_plan_json=prev_squad_json,
         )
         squad_json, log = apply_season_master_plan_alignment(
             cache_dir,

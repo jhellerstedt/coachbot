@@ -245,6 +245,7 @@ def apply_athlete_bodyweight_to_gym_session(
 class GymSetMetrics:
     reps: int
     weight_kg: float
+    rpe: Optional[float] = None
 
 
 @dataclass
@@ -255,20 +256,39 @@ class GymExerciseMetrics:
     sets: List[GymSetMetrics] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
+        sets_out: List[Dict[str, Any]] = []
+        for s in self.sets:
+            row: Dict[str, Any] = {"reps": s.reps, "weight_kg": s.weight_kg}
+            if s.rpe is not None:
+                row["rpe"] = s.rpe
+            sets_out.append(row)
         return {
             "name": self.name,
             "max_weight_kg": self.max_weight_kg,
             "tonnage_kg": self.tonnage_kg,
-            "sets": [{"reps": s.reps, "weight_kg": s.weight_kg} for s in self.sets],
+            "sets": sets_out,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GymExerciseMetrics":
-        sets = [
-            GymSetMetrics(reps=int(s["reps"]), weight_kg=float(s["weight_kg"]))
-            for s in data.get("sets") or []
-            if s.get("reps") is not None and s.get("weight_kg") is not None
-        ]
+        sets: List[GymSetMetrics] = []
+        for s in data.get("sets") or []:
+            if s.get("reps") is None or s.get("weight_kg") is None:
+                continue
+            rpe_raw = s.get("rpe")
+            rpe = None
+            if rpe_raw is not None and rpe_raw != "":
+                try:
+                    rpe = float(rpe_raw)
+                except (TypeError, ValueError):
+                    rpe = None
+            sets.append(
+                GymSetMetrics(
+                    reps=int(s["reps"]),
+                    weight_kg=float(s["weight_kg"]),
+                    rpe=rpe,
+                )
+            )
         return cls(
             name=str(data.get("name", "")),
             max_weight_kg=float(data.get("max_weight_kg", 0)),
@@ -601,6 +621,43 @@ def plan_record_session_for_date(
     return session_from_plan(record.plan_text, record.plan_json, d)
 
 
+def _today_session_extra_blocks(
+    plan_record: WeeklyPlanRecord,
+    local_date: date,
+    athlete_message: str,
+) -> List[str]:
+    """Today's session for coach prompts; recovery-gated gym does not rewrite the plan."""
+    from dataclasses import replace as dc_replace
+
+    from gym_program import (
+        gate_gym_session_for_recovery,
+        infer_poor_recovery,
+        recovery_gate_note,
+    )
+    from weekly_plan_schema import render_day_text, session_for_date
+
+    poor = infer_poor_recovery(athlete_message)
+    if poor and plan_record.plan_json:
+        day = session_for_date(plan_record.plan_json, local_date)
+        if day is not None and day.gym is not None:
+            gated_day = dc_replace(
+                day, gym=gate_gym_session_for_recovery(day.gym, poor_recovery=True)
+            )
+            blocks = [
+                f"--- Today's prescribed session ({day.weekday}) [recovery-gated] ---\n"
+                f"{render_day_text(gated_day)}"
+            ]
+            note = recovery_gate_note(True)
+            if note:
+                blocks.append(f"--- Recovery gate ---\n{note}")
+            return blocks
+    today_section = plan_record_session_for_date(plan_record, local_date)
+    if not today_section:
+        return []
+    day_name, section = today_section
+    return [f"--- Today's prescribed session ({day_name}) ---\n{section}"]
+
+
 def plan_adjustments_dir(cache_dir: Path) -> Path:
     return cache_dir / "plan_adjustments"
 
@@ -865,12 +922,9 @@ def build_coach_message_prompt(
             f"--- Training summary (recent erg performance) ---\n"
             f"{plan_record.training_summary.strip()}"
         )
-    today_section = plan_record_session_for_date(plan_record, local_date)
-    if today_section:
-        day_name, section = today_section
-        extra_blocks.append(
-            f"--- Today's prescribed session ({day_name}) ---\n{section}"
-        )
+    extra_blocks.extend(
+        _today_session_extra_blocks(plan_record, local_date, athlete_message)
+    )
     if plan_record.goal_tracking and str(plan_record.goal_tracking).strip():
         extra_blocks.append(
             f"--- Season goal tracking ---\n{str(plan_record.goal_tracking).strip()}"
@@ -920,6 +974,8 @@ def build_coach_message_prompt(
         "emphasize 'intent'—explosive concentric speed and load quality rather than "
         "just volume. Reference the athlete's recent tonnage history (provided above) "
         "to ensure progressive overload.\n"
+        "- If a recovery-gated today's session is present, use that intensity for "
+        "today only; do not treat it as a change to the stored weekly plan.\n"
         "- If the context does not specify something the athlete asks for, say so clearly.\n"
         "- Be concise and actionable. Do not rewrite the full weekly plan."
     )
@@ -1065,12 +1121,9 @@ def build_coach_interpret_prompt(
             f"--- Training summary (recent erg performance) ---\n"
             f"{plan_record.training_summary.strip()}"
         )
-    today_section = plan_record_session_for_date(plan_record, local_date)
-    if today_section:
-        day_name, section = today_section
-        extra_blocks.append(
-            f"--- Today's prescribed session ({day_name}) ---\n{section}"
-        )
+    extra_blocks.extend(
+        _today_session_extra_blocks(plan_record, local_date, athlete_message)
+    )
     if plan_record.goal_tracking and str(plan_record.goal_tracking).strip():
         extra_blocks.append(
             f"--- Season goal tracking ---\n{str(plan_record.goal_tracking).strip()}"
@@ -1839,7 +1892,14 @@ def gym_session_metrics_from_harness(
                 continue
             if reps < 1 or w < 0:
                 continue
-            sets.append(GymSetMetrics(reps=reps, weight_kg=w))
+            rpe_raw = s.get("rpe")
+            rpe = None
+            if rpe_raw is not None and rpe_raw != "":
+                try:
+                    rpe = float(rpe_raw)
+                except (TypeError, ValueError):
+                    rpe = None
+            sets.append(GymSetMetrics(reps=reps, weight_kg=w, rpe=rpe))
         if not sets:
             continue
         max_w = max(s.weight_kg for s in sets)
@@ -3788,6 +3848,7 @@ def zulip_gym_logs_as_metrics_records(
             "gym": gym,
             "source": source,
             "gym_log_id": log_id,
+            "athlete_id": athlete_id,
         }
     return out
 
@@ -5325,11 +5386,9 @@ _PROGRAMMING_GUIDELINES_CONTEXT = (
     "of high-intensity erg sessions.\n"
     "4. Session Structure: Prioritize compound lifts first, followed by core/accessory "
     "work.\n"
-    "5. A/B split & variety: Keep one leg/posterior-chain dominant day and one "
-    "upper-body/core dominant day (Mon/Wed). Each week rotate in at least one exercise "
-    "per day that was NOT in the previous week's session for that day, staying within "
-    "the same category (leg-day swaps stay leg exercises; upper/core-day swaps stay "
-    "upper/core).\n"
+    "5. A/B split: Keep one leg/posterior-chain dominant day and one "
+    "upper-body/core dominant day (Mon/Wed). Exercise names come from the squad "
+    "gym program — do not invent or rotate the menu week to week.\n"
     "6. Set pyramids (base/build only): Base phase uses ascending pyramids "
     "(light→heavy: ~60%/75%/87%/100% of 8RM with 12/10/8/7 reps). Build phase uses "
     "reverse pyramids (heavy→light: ~100%/85%/78%/70% of 8RM with 5/6/8/10 reps). "
@@ -5501,38 +5560,23 @@ def format_previous_week_gym_exercises(
     by_day = extract_gym_exercises_by_day(plan_text)
     if not by_day:
         return ""
-    lines = ["Previous week gym exercises (rotate within the same A/B category):"]
+    lines = ["Previous week gym exercises (reuse exactly on deload weeks):"]
     for day_name, names in by_day.items():
         category = classify_gym_exercise_list(names)
         label = _GYM_CATEGORY_LABEL.get(category, "mixed")
         lines.append(f"- {day_name} ({label} day): {', '.join(names)}")
     lines.append(
-        "This week, on EACH gym day rotate in at least one different pool exercise of "
-        "the SAME category (leg-day swap stays a leg exercise; upper/core-day swap "
-        "stays upper/core). Keep the A/B split: one leg-dominant day and one "
-        "upper-body/core-dominant day."
+        "Gym exercise names come from the squad gym program. Do not rotate or "
+        "substitute. Deload/recovery/taper weeks reuse these names exactly."
     )
     return "\n".join(lines)
 
 
 _GYM_EXERCISE_OPTIONS_CONTEXT = (
-    "Gym exercise pool, grouped by A/B session category. Run one leg-dominant day and "
-    "one upper-body/core-dominant day (Mon/Wed). Prefer exercises with recent lift "
-    "history; rotate at least one exercise per day vs last week, staying within that "
-    "day's category:\n"
-    "Leg / posterior-chain day:\n"
-    "- Back squat; back squat to box\n"
-    "- Hex-bar deadlift\n"
-    "- Romanian deadlift\n"
-    "- Bulgarian split squat\n"
-    "- Kettlebell swings\n"
-    "Upper-body / core day:\n"
-    "- Bench press; incline bench press\n"
-    "- Barbell row\n"
-    "- Lat pull-down / lat pulls\n"
-    "- Pull-ups\n"
-    "- Arnold press\n"
-    "- Russian twists; plank\n"
+    "Gym structure comes from the squad gym program. Monday is a 4-exercise "
+    "leg/posterior-chain day; Wednesday is a 4-exercise upper-body/core day. "
+    "Do NOT change exercise names, order, or categories; code overwrites gym days "
+    "from the program. Only leave plausible kg placeholders if the schema requires them.\n"
 )
 
 
@@ -5620,10 +5664,8 @@ def _weekly_plan_lifting_clause(
         "- Target weights must progress logically from the lift history below "
         "(latest max_weight_kg and tonnage per exercise); differentiate warm-up vs "
         "top sets when appropriate.\n"
-        "- Exercise variety (strict): when previous week's gym exercises are listed "
-        "in context (split by A/B day type), rotate at least ONE exercise on EACH day "
-        "for a different pool exercise OF THE SAME CATEGORY. Keep other staples for "
-        "progressive overload."
+        "- Exercise names come from the gym program. Do NOT rotate, add, drop, or "
+        "substitute exercises."
     )
 
 
@@ -5787,12 +5829,15 @@ def generate_squad_weekly_plan(
     season_week_context: Optional[str] = None,
     phase: Optional[str] = None,
     recent_session_ids: Optional[Sequence[str]] = None,
+    peak_kg_by_exercise: Optional[Mapping[str, float]] = None,
+    prev_plan_json: Optional[Dict[str, Any]] = None,
+    gym_lift_review: Optional[str] = None,
 ) -> GeneratedWeeklyPlan:
     """
     Squad weekly plan for the public channel: session structure with squad-average
     targets (splits, HR, gym loads). Execution-only day-by-day output.
     """
-    from weekly_plan_schema import is_low_intensity_plan_phase, parse_weekly_plan, render_plan_text
+    from weekly_plan_schema import parse_weekly_plan, render_plan_text
     from session_library import (
         apply_library_sessions_to_plan,
         format_session_library_prompt,
@@ -5819,17 +5864,13 @@ def generate_squad_weekly_plan(
         extra_sections.append(
             f"--- Gym lift history (for target weights) ---\n{gym_exercise_history}"
         )
+    if gym_lift_review and include_lifting:
+        extra_sections.append(gym_lift_review.strip())
     if previous_week_gym_exercises and include_lifting:
-        if is_low_intensity_plan_phase(phase):
-            extra_sections.append(
-                "--- Previous week gym exercises (reuse exactly for deload) ---\n"
-                f"{previous_week_gym_exercises}"
-            )
-        else:
-            extra_sections.append(
-                f"--- Previous week gym exercises (vary at least one) ---\n"
-                f"{previous_week_gym_exercises}"
-            )
+        extra_sections.append(
+            "--- Previous week gym exercises (program reuse / deload names) ---\n"
+            f"{previous_week_gym_exercises}"
+        )
     if coach_adjustments and coach_adjustments.strip():
         extra_sections.append(
             "--- Athlete-requested plan adjustments (apply to this week's plan) ---\n"
@@ -5919,6 +5960,16 @@ def generate_squad_weekly_plan(
         patched = apply_library_sessions_to_plan(
             generated.plan_json, session_selections
         )
+        if include_lifting:
+            from gym_program import apply_program_gym_to_plan, next_gym_week_index
+
+            patched = apply_program_gym_to_plan(
+                patched,
+                phase=phase,
+                week_index=next_gym_week_index(prev_plan_json),
+                peak_kg_by_exercise=peak_kg_by_exercise,
+                prev_plan_json=prev_plan_json,
+            )
         parsed = parse_weekly_plan(patched)
         if parsed is not None:
             return GeneratedWeeklyPlan(
@@ -5974,6 +6025,7 @@ def generate_athlete_weekly_plan(
     athlete_hr_context: Optional[str] = None,
     athlete_profile: Optional[AthleteProfile] = None,
     season_week_context: Optional[str] = None,
+    lift_logs_by_exercise: Optional[Mapping[str, Sequence[Any]]] = None,
 ) -> GeneratedWeeklyPlan:
     """Personalised weekly plan for one athlete (DM): tailored targets per session.
 
@@ -6079,7 +6131,7 @@ def generate_athlete_weekly_plan(
         f"{extra_block}"
         f"--- {athlete_label}: erg training summary ---\n{athlete_training_summary}"
     )
-    return _generate_structured_plan_with_fallback(
+    generated = _generate_structured_plan_with_fallback(
         system,
         user,
         token,
@@ -6091,6 +6143,23 @@ def generate_athlete_weekly_plan(
         athlete_profile=athlete_profile,
         prose_fallback=lambda: _call_llm(system, user, token),
     )
+    if generated.plan_json and squad_plan_json and include_lifting:
+        from gym_program import load_program_from_plan, personalize_plan_gym_loads
+        from weekly_plan_schema import parse_weekly_plan, render_plan_text
+
+        patched = personalize_plan_gym_loads(
+            generated.plan_json,
+            squad_plan_json,
+            lift_logs_by_exercise=lift_logs_by_exercise,
+            program=load_program_from_plan(squad_plan_json),
+        )
+        parsed = parse_weekly_plan(patched)
+        if parsed is not None:
+            return GeneratedWeeklyPlan(
+                plan_json=patched,
+                plan_text=render_plan_text(parsed, absolute_hr_bpm=False),
+            )
+    return generated
 
 
 def get_kagi_athlete_weekly_plan(
@@ -6410,6 +6479,11 @@ def send_weekly_athlete_plan_dms(
             if include_lifting
             else None
         )
+        athlete_lift_logs = None
+        if include_lifting:
+            from gym_program import lift_logs_from_metrics
+
+            athlete_lift_logs = lift_logs_from_metrics(athlete_metrics)
         try:
             generated = generate_athlete_weekly_plan(
                 athlete.label,
@@ -6425,6 +6499,7 @@ def send_weekly_athlete_plan_dms(
                 athlete_hr_context=athlete.hr_zone_context_text(),
                 athlete_profile=athlete._athlete_profile(),
                 season_week_context=season_week_context,
+                lift_logs_by_exercise=athlete_lift_logs,
             )
             athlete_plan_json = generated.plan_json
             prev_athlete_record = load_athlete_weekly_plan(
@@ -6876,6 +6951,14 @@ def run_weekly_training_pipeline(
     gym_exercise_history = format_exercise_history_for_plan(
         metrics_with_zulip or activity_metrics or {}
     )
+    peak_kg_by_exercise = None
+    gym_lift_review = None
+    if include_lifting:
+        from gym_program import median_latest_peak_kg
+
+        peak_kg_by_exercise = median_latest_peak_kg(
+            metrics_with_zulip or activity_metrics or {}
+        )
     previous_week_gym_exercises: Optional[str] = None
     if include_lifting and prev_record and (
         prev_record.plan_json or prev_record.plan_text.strip()
@@ -6930,6 +7013,26 @@ def run_weekly_training_pipeline(
     if phase:
         print(f"Season phase for {target_week.week_start.isoformat()}: {phase}.", flush=True)
 
+    if include_lifting:
+        from gym_program import (
+            format_lift_review,
+            lift_logs_from_metrics,
+            load_program,
+            review_lifts,
+        )
+
+        try:
+            gym_lift_review = format_lift_review(
+                review_lifts(
+                    lift_logs_from_metrics(
+                        metrics_with_zulip or activity_metrics or {}
+                    ),
+                    load_program(phase),
+                )
+            )
+        except Exception:
+            gym_lift_review = None
+
     goal_tracking = get_kagi_goal_tracking(
         training_summary,
         token,
@@ -6978,6 +7081,9 @@ def run_weekly_training_pipeline(
         recent_session_ids=recent_session_ids_from_plan(
             prev_record.plan_json if prev_record else None
         ),
+        peak_kg_by_exercise=peak_kg_by_exercise,
+        prev_plan_json=prev_record.plan_json if prev_record else None,
+        gym_lift_review=gym_lift_review,
     )
     plan_json = generated_plan.plan_json
     prev_json = prev_record.plan_json if prev_record else None

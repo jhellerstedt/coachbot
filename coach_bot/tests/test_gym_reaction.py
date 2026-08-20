@@ -75,6 +75,16 @@ def test_format_gym_log_confirmation_includes_log_id():
     assert "**Logged gym session** (`gym-log-abc`, 2026-06-29)" in text
 
 
+def test_gym_log_without_rpe_prompts_follow_up():
+    from gym_program import format_rpe_follow_up, gym_log_missing_rpe
+
+    record = _sample_gym_record()
+    record["gym"]["exercises"][0]["sets"] = [{"reps": 8, "weight_kg": 70}]
+    assert gym_log_missing_rpe(record) is True
+    assert "RPE" in format_rpe_follow_up()
+
+
+
 def test_thumbs_down_deletes_gym_log_by_coach_reply_message(tmp_path):
     athlete_id = 53603359
     record = _sample_gym_record(coach_reply_zulip_message_id=555002)

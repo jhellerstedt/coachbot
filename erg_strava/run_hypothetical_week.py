@@ -145,9 +145,12 @@ def main() -> None:
                 if record:
                     activity_metrics[aid] = record
 
-        gym_history = format_exercise_history_for_plan(
-            filter_metrics_for_athlete(cache_dir, JACK_ID, activity_metrics)
-        )
+        jack_metrics = filter_metrics_for_athlete(cache_dir, JACK_ID, activity_metrics)
+        gym_history = format_exercise_history_for_plan(jack_metrics)
+        from gym_program import lift_logs_from_metrics, median_latest_peak_kg
+
+        jack_peaks = median_latest_peak_kg(jack_metrics)
+        jack_logs = lift_logs_from_metrics(jack_metrics)
         prev_gym = format_previous_week_gym_exercises(jack_prev_text, jack_prev_json)
 
         adherence = (
@@ -191,6 +194,8 @@ def main() -> None:
             previous_week_gym_exercises=prev_gym,
             season_week_context=season_ctx,
             phase=phase,
+            prev_plan_json=squad_prev_json,
+            peak_kg_by_exercise=jack_peaks,
         )
         squad_json, squad_log = apply_season_master_plan_alignment(
             cache_dir,
@@ -226,6 +231,7 @@ def main() -> None:
             recent_sessions_summary=adherence,
             athlete_hr_context=hr_ctx,
             season_week_context=season_ctx,
+            lift_logs_by_exercise=jack_logs,
         )
         athlete_json, athlete_log = apply_season_master_plan_alignment(
             cache_dir,

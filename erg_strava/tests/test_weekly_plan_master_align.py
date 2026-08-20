@@ -278,6 +278,21 @@ def test_enforce_weekly_plan_alignment_always_runs_when_target_exists():
         assert result.corrected is True
 
 
+def test_enforce_alignment_preserves_gym_program_metadata():
+    compliant = weekly_plan_to_dict(
+        correct_weekly_plan("2026-06-29", misaligned_deload_plan_dict(), deload_targets())[0]
+    )
+    compliant["gym_program"] = {"id": "build-a", "week_index": 4}
+    compliant["session_library"] = {"tuesday": "z2-steady-25"}
+    result = enforce_weekly_plan_alignment(
+        "2026-06-29",
+        compliant,
+        deload_targets(),
+    )
+    assert result.plan_json["gym_program"]["week_index"] == 4
+    assert result.plan_json["session_library"]["tuesday"] == "z2-steady-25"
+
+
 def test_correct_deload_plan_passes_regression_checklist():
     misaligned = misaligned_deload_plan_dict()
     corrected_plan, after = correct_weekly_plan(

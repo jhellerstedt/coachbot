@@ -375,8 +375,9 @@ _LOGGED_GYM_SET_SCHEMA: Dict[str, Any] = {
         "reps": {"type": "integer", "minimum": 1},
         "weight_kg": {"type": "number", "minimum": 0},
         "duration_sec": {"type": ["integer", "null"]},
+        "rpe": {"type": ["number", "null"], "minimum": 1, "maximum": 10},
     },
-    "required": ["reps", "weight_kg", "duration_sec"],
+    "required": ["reps", "weight_kg", "duration_sec", "rpe"],
     "additionalProperties": False,
 }
 
@@ -432,6 +433,8 @@ GYM_SESSION_HARNESS_INSTRUCTIONS = (
     "8. Omit boilerplate lines (\"gym this morning\", goals, session labels).\n"
     "9. Include every weighted working set the athlete reported; do not merge or drop sets.\n"
     "10. Do not compute tonnage — only list sets. Use assumptions for any ambiguity.\n"
+    "11. If the athlete gave an effort rating, set rpe (1–10) on that set; "
+    "easy≈5, moderate≈7, hard≈8.5, max effort≈10. If none was given, set rpe to null.\n"
 )
 
 
@@ -494,6 +497,15 @@ def _parse_logged_gym_set(raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     row: Dict[str, Any] = {"reps": reps, "weight_kg": weight_kg}
     if duration_sec is not None:
         row["duration_sec"] = duration_sec
+    rpe_raw = raw.get("rpe")
+    if rpe_raw is not None and rpe_raw != "":
+        try:
+            rpe = float(rpe_raw)
+        except (TypeError, ValueError):
+            return None
+        if rpe < 1 or rpe > 10:
+            return None
+        row["rpe"] = rpe
     return row
 
 
@@ -1215,16 +1227,14 @@ def format_previous_week_gym_exercises_from_json(
     by_day = extract_gym_exercises_by_day_from_json(plan_json)
     if not by_day:
         return ""
-    lines = ["Previous week gym exercises (rotate within the same A/B category):"]
+    lines = ["Previous week gym exercises (reuse exactly on deload weeks):"]
     for day_name, names in by_day.items():
         category = classify_gym_exercise_list(names)
         label = _GYM_CATEGORY_LABEL.get(category, "mixed")
         lines.append(f"- {day_name} ({label} day): {', '.join(names)}")
     lines.append(
-        "This week, on EACH gym day rotate in at least one different pool exercise of "
-        "the SAME category (leg-day swap stays a leg exercise; upper/core-day swap "
-        "stays upper/core). Keep the A/B split: one leg-dominant day and one "
-        "upper-body/core-dominant day."
+        "Gym exercise names come from the squad gym program. Do not rotate or "
+        "substitute. Deload/recovery/taper weeks reuse these names exactly."
     )
     return "\n".join(lines)
 

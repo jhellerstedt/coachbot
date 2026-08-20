@@ -155,3 +155,37 @@ def test_rowing_zone_templates_in_structured_and_repair_prompts():
         _ROWING_ZONE_SESSION_TEMPLATES in _INTERVAL_SESSION_REPAIR_SYSTEM
         or _ROWING_ZONE_SESSION_TEMPLATES[:40] in _INTERVAL_SESSION_REPAIR_SYSTEM
     )
+
+
+def test_today_session_recovery_gate_does_not_rewrite_plan_json():
+    from datetime import date
+    from generate_training_plan import _today_session_extra_blocks
+
+    plan = sample_squad_plan_dict()
+    original = json.dumps(plan)
+    monday_sets = len(plan["days"][0]["gym"]["exercises"][0]["sets"])
+    record = WeeklyPlanRecord(
+        week_id="2026-06-15_2026-06-21",
+        week_start="2026-06-15",
+        week_end="2026-06-21",
+        plan_text="Monday:\ngym\n",
+        generated_at="2026-06-14T00:00:00+00:00",
+        training_summary="",
+        include_lifting=True,
+        plan_json=plan,
+    )
+    blocks = _today_session_extra_blocks(
+        record, date(2026, 6, 15), "slept terribly and feel wrecked"
+    )
+    assert any("recovery-gated" in b for b in blocks)
+    assert any("does not change the weekly program" in b for b in blocks)
+    assert json.dumps(record.plan_json) == original
+    assert len(plan["days"][0]["gym"]["exercises"][0]["sets"]) == monday_sets
+
+
+def test_lifting_clause_does_not_ask_llm_to_rotate():
+    from generate_training_plan import _weekly_plan_lifting_clause
+
+    text = _weekly_plan_lifting_clause(True, phase="base")
+    assert "rotate at least" not in text.lower()
+    assert "gym program" in text.lower()

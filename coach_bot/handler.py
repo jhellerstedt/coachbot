@@ -882,6 +882,12 @@ class CoachMessageHandler:
                     reply = (
                         f"{reply}\n\n{comparison_note}" if reply else comparison_note
                     )
+                from gym_program import format_rpe_follow_up, gym_log_missing_rpe
+
+                if gym_log_missing_rpe(gym_record):
+                    rpe_note = format_rpe_follow_up()
+                    if rpe_note not in reply:
+                        reply = f"{reply}\n\n{rpe_note}" if reply else rpe_note
             except ValueError as exc:
                 reply = (
                     f"{reply}\n\n(Could not log gym session: {exc})"

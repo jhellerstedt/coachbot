@@ -36,48 +36,43 @@ The two gym days are deliberately different so you train the whole body across t
 
 Monday and Wednesday each take one of these roles; they're never collapsed into the same type.
 
-## Exercise pool
+## The gym program (source of truth)
 
-Sessions are chosen from a set list, grouped by which day they belong to:
+A **mesocycle program** owns which four exercises you do on Monday (leg) and Wednesday (upper/core). The weekly plan *materializes* that program — it does not invent a new menu each week.
 
-**Leg / posterior-chain day**
-- Back squat / back squat to box
-- Hex-bar deadlift, Romanian deadlift
-- Bulgarian split squat
-- Kettlebell swings
-
-**Upper-body / core day**
-- Bench press / incline bench press
-- Barbell row
-- Lat pull-down / lat pulls, pull-ups
-- Arnold press
-- Russian twists, plank
-
-**Each day rotates in at least one exercise that wasn't in last week's matching session** — and the swap stays in the same category (a leg-day swap stays a leg exercise; an upper/core-day swap stays upper/core). Staples still carry through for progressive overload, so the menu varies without breaking the A/B balance.
+Planned rotations (for example swapping Bulgarian split squat for kettlebell swings after a few weeks) live on the program. Deload weeks **reuse last week's exercise names** and drop to two lighter sets.
 
 ## Squad plan vs your personal plan
 
-- The **public squad plan** sets the structure: which days, session types, and **which exercises** you do.
-- Your **private DM plan** uses the **exact same exercises** as the squad plan — only the **per-set reps and weights** are tailored to your own lift history. So everyone trains the same movements; your numbers are yours.
+- The **public squad plan** uses the program's exercises. Squad kg are the **median** of each athlete's latest logged peak for that lift, then the usual phase pyramid (base ascending / build reverse).
+- Your **private DM plan** uses the **exact same exercises** in the same order. Your kg come from **your last logs plus that lift's progression rule** (typically +2.5 kg after two sessions at the top of the range), then the same pyramid.
 
 ## How the load is decided (periodisation)
 
 Gym intensity is matched to where you are in the season:
 
-- **Early season** → hypertrophy and durability (moderate volume).
-- **Pre-championships / 2k focus** → maximal strength and power (low volume, high load, explosive intent).
+- **Early season (base)** → hypertrophy and durability (ascending pyramids).
+- **Build / pre-championships** → strength and power (reverse pyramids).
+- **Season deload weeks** are prescribed on the calendar: same exercises, two sets at about 82% of working weight.
 
 **Load management:** heavy leg days (back squat / hex-bar) are kept away from high-intensity erg sessions (2k-pace / anaerobic work) by at least 24 hours.
 
-## Progressive overload (using your real numbers)
+## Progressive overload (per lift, from your logs)
 
-- Every time you log a gym session, your **total tonnage** (sum of reps × weight across all sets) is recorded. Pull-ups and other bodyweight moves are counted at your body weight; unilateral lifts like Bulgarian split squats count both legs.
-- The coach uses your **recent tonnage history** to push weights up sensibly week to week.
+- Every time you log a gym session, **tonnage** is still recorded (sum of reps × weight). Pull-ups and other bodyweight moves are counted at your body weight; unilateral lifts like Bulgarian split squats count both legs.
+- **Each lift** also has a progression rule. After you log:
+  - Hit the target reps with RPE ≤ 7 (or no RPE given) for two sessions running → add 2.5 kg next week.
+  - Hit the reps but grind (RPE 9–10) → **hold**.
+  - Miss the reps → **hold or drop 2.5 kg** on that lift only.
+- Season deload weeks stay prescribed. Per-lift hold/progress is inferred from logs on working weeks.
 
-When you log a session, the bot benchmarks it two ways — **without** second-guessing your effort (deloads are prescribed by the coach, not inferred):
+If you log sets without an effort rating, the bot will ask once for **RPE 1–10** (or easy / moderate / hard / max).
 
-- **Actual vs prescribed** — how your logged tonnage compares to what the plan called for that day (on plan / above / below).
-- **vs your last comparable day** — compared against your previous session of the **same type** (leg day vs leg day, upper/core vs upper/core), so the number isn't skewed by comparing a leg day to an upper-body day.
+When you log a session, the bot still benchmarks **actual vs prescribed** tonnage and **vs your last comparable day** (leg vs leg, upper/core vs upper/core).
+
+## Today only: recovery gate
+
+If you say recovery is poor (bad sleep, wrecked, low HRV), **today's** gym reply can drop a set or about 10% load. That does **not** rewrite the weekly program.
 
 ## Season targets it all feeds
 

@@ -1,0 +1,109 @@
+{
+  "id": "base-a",
+  "phases": ["base"],
+  "monday": {
+    "category": "leg",
+    "goal": "hypertrophy",
+    "exercises": [
+      {
+        "name": "Back squat",
+        "default_peak_kg": 70,
+        "default_reps": 8,
+        "default_sets": 3,
+        "progression": {
+          "kind": "double_progression",
+          "increment_kg": 2.5,
+          "hit_sessions_required": 2
+        }
+      },
+      {
+        "name": "Romanian deadlift",
+        "default_peak_kg": 60,
+        "default_reps": 8,
+        "default_sets": 3,
+        "progression": {
+          "kind": "double_progression",
+          "increment_kg": 2.5,
+          "hit_sessions_required": 2
+        }
+      },
+      {
+        "name": "Bulgarian split squat",
+        "default_peak_kg": 30,
+        "default_reps": 8,
+        "default_sets": 3,
+        "progression": {
+          "kind": "double_progression",
+          "increment_kg": 2.5,
+          "hit_sessions_required": 2
+        }
+      },
+      {
+        "name": "Plank",
+        "default_duration_sec": 30,
+        "default_reps": 1,
+        "default_sets": 2,
+        "progression": {
+          "kind": "none"
+        }
+      }
+    ]
+  },
+  "wednesday": {
+    "category": "upper_core",
+    "goal": "hypertrophy",
+    "exercises": [
+      {
+        "name": "Incline bench press",
+        "default_peak_kg": 40,
+        "default_reps": 8,
+        "default_sets": 3,
+        "progression": {
+          "kind": "double_progression",
+          "increment_kg": 2.5,
+          "hit_sessions_required": 2
+        }
+      },
+      {
+        "name": "Barbell row",
+        "default_peak_kg": 45,
+        "default_reps": 8,
+        "default_sets": 3,
+        "progression": {
+          "kind": "double_progression",
+          "increment_kg": 2.5,
+          "hit_sessions_required": 2
+        }
+      },
+      {
+        "name": "Lat pull-down",
+        "default_peak_kg": 50,
+        "default_reps": 8,
+        "default_sets": 3,
+        "progression": {
+          "kind": "double_progression",
+          "increment_kg": 2.5,
+          "hit_sessions_required": 2
+        }
+      },
+      {
+        "name": "Russian twists",
+        "default_peak_kg": 8,
+        "default_reps": 20,
+        "default_sets": 2,
+        "progression": {
+          "kind": "double_progression",
+          "increment_kg": 2.5,
+          "hit_sessions_required": 2
+        }
+      }
+    ]
+  },
+  "rotations": [
+    {
+      "after_weeks": 3,
+      "replace": "Bulgarian split squat",
+      "with": "Kettlebell swings"
+    }
+  ]
+}
