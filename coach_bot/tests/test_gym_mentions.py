@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 from coach_bot.config import CoachAthleteCfg, resolve_gym_log_recipients
+from coach_bot.handler import CoachMessageHandler
 from generate_training_plan import (
+    CoachInterpretation,
     GymExerciseMetrics,
     GymSessionMetrics,
     GymSetMetrics,
+    WeeklyPlanRecord,
     find_gym_log_by_zulip_message,
     load_gym_logs_for_athlete,
     record_gym_sessions_from_zulip_for_athletes,
@@ -193,3 +197,123 @@ def test_multi_athlete_zulip_gym_logs_are_idempotent(tmp_path, monkeypatch):
     assert [r["id"] for r in first] == [r["id"] for r in second]
     assert len(load_gym_logs_for_athlete(tmp_path, 1)) == 1
     assert find_gym_log_by_zulip_message(tmp_path, 1, 44001)["id"] == first[0]["id"]
+
+
+def _handler(tmp_path) -> CoachMessageHandler:
+    return CoachMessageHandler(
+        cache_dir=tmp_path,
+        bot_user_id=99,
+        zulip_client=MagicMock(),
+        kagi_token="token",
+        zulip_stream="general",
+        athletes=_athletes(),
+    )
+
+
+def _plan() -> WeeklyPlanRecord:
+    return WeeklyPlanRecord(
+        week_id="2026-08-24_2026-08-30",
+        week_start="2026-08-24",
+        week_end="2026-08-30",
+        plan_text="Monday gym.",
+        generated_at="2026-08-24T00:00:00Z",
+        training_summary="",
+        include_lifting=True,
+    )
+
+
+def _patch_gym_log_handler(monkeypatch, handler: CoachMessageHandler):
+    monkeypatch.setattr(
+        "coach_bot.handler.plan_for_date", lambda *_args, **_kwargs: _plan()
+    )
+    monkeypatch.setattr(
+        "coach_bot.handler.load_bot_config",
+        lambda: (None, None, None, None, None, handler.athletes),
+    )
+    monkeypatch.setattr(
+        "coach_bot.handler.interpret_coach_message_with_kagi",
+        lambda *_args, **_kwargs: CoachInterpretation(
+            intent="gym_session_log",
+            reply="Nice work.",
+            workout_text="Back squat 5x5 100",
+        ),
+    )
+    monkeypatch.setattr(
+        "generate_training_plan.parse_gym_session_metrics",
+        lambda *_args, **_kwargs: _parsed_gym(),
+    )
+
+
+def test_stream_gym_log_credits_sender_and_mentions(tmp_path, monkeypatch):
+    handler = _handler(tmp_path)
+    _patch_gym_log_handler(monkeypatch, handler)
+    ref = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    message = {
+        "id": 9001,
+        "sender_id": 101,
+        "sender_email": "jack@example.com",
+        "sender_full_name": "Jack H",
+        "content": (
+            "@**coach|99** gym with @**Sarah T|202** and @**Tom B|303**: "
+            "Back squat 5x5 100"
+        ),
+        "type": "stream",
+        "timestamp": ref.timestamp(),
+    }
+    reply = handler._reply_kagi(
+        "gym with Sarah and Tom: Back squat 5x5 100", ref, message
+    )
+    assert "Jack H" in reply
+    assert "Sarah T" in reply
+    assert "Tom B" in reply
+    assert len(load_gym_logs_for_athlete(tmp_path, 1)) == 1
+    assert len(load_gym_logs_for_athlete(tmp_path, 2)) == 1
+    assert len(load_gym_logs_for_athlete(tmp_path, 3)) == 1
+    pending = handler.consume_pending_gym_log()
+    assert pending is not None
+    assert {athlete_id for athlete_id, _log_id in pending} == {1, 2, 3}
+
+
+def test_dm_gym_log_ignores_mentions(tmp_path, monkeypatch):
+    handler = _handler(tmp_path)
+    _patch_gym_log_handler(monkeypatch, handler)
+    ref = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    message = {
+        "id": 9002,
+        "sender_id": 101,
+        "sender_email": "jack@example.com",
+        "sender_full_name": "Jack H",
+        "content": "gym with @**Sarah T|202**: Back squat 5x5 100",
+        "type": "private",
+        "timestamp": ref.timestamp(),
+    }
+    reply = handler._reply_kagi(
+        "gym with Sarah: Back squat 5x5 100",
+        ref,
+        message,
+        private_dm=True,
+    )
+    assert "Sarah T" not in reply
+    assert len(load_gym_logs_for_athlete(tmp_path, 1)) == 1
+    assert load_gym_logs_for_athlete(tmp_path, 2) == []
+
+
+def test_unmapped_sender_stream_gym_log_credits_mention(tmp_path, monkeypatch):
+    handler = _handler(tmp_path)
+    _patch_gym_log_handler(monkeypatch, handler)
+    ref = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    message = {
+        "id": 9003,
+        "sender_id": 999,
+        "sender_email": "coach@example.com",
+        "sender_full_name": "Head Coach",
+        "content": "@**coach|99** logging for @**Sarah T|202** gym: Back squat 5x5 100",
+        "type": "stream",
+        "timestamp": ref.timestamp(),
+    }
+    reply = handler._reply_kagi(
+        "logging for Sarah gym: Back squat 5x5 100", ref, message
+    )
+    assert "Sarah T" in reply
+    assert load_gym_logs_for_athlete(tmp_path, 1) == []
+    assert len(load_gym_logs_for_athlete(tmp_path, 2)) == 1
