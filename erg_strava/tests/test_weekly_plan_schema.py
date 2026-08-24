@@ -407,6 +407,33 @@ def test_validate_athlete_must_match_squad_gym_exercises():
     assert "gym exercises" in err
 
 
+def test_validate_athlete_rejects_warmup_duration_mismatch():
+    squad = parse_weekly_plan(sample_squad_plan_dict())
+    assert squad is not None
+    data = json.loads(json.dumps(sample_squad_plan_dict()))
+    data["personalised"] = True
+    data["days"][1]["rowing"]["segments"][0]["duration"] = "12 min"
+    athlete = parse_weekly_plan(data)
+    assert athlete is not None
+    err = validate_athlete_plan_against_squad(athlete, squad)
+    assert err is not None
+    assert "duration" in err.lower() or "Tuesday" in err
+
+
+def test_validate_athlete_rejects_missing_recommended_erg():
+    squad_data = sample_squad_plan_dict()
+    squad_data["recommended_erg"] = _recommended_erg_dict()
+    squad = parse_weekly_plan(squad_data)
+    assert squad is not None
+    athlete_data = json.loads(json.dumps(sample_squad_plan_dict()))
+    athlete_data["personalised"] = True
+    athlete = parse_weekly_plan(athlete_data)
+    assert athlete is not None
+    err = validate_athlete_plan_against_squad(athlete, squad)
+    assert err is not None
+    assert "recommended" in err.lower()
+
+
 def test_round_trip_dict():
     plan = parse_weekly_plan(sample_squad_plan_dict())
     assert plan is not None
@@ -861,3 +888,23 @@ def test_personalize_recommended_erg_rewrites_hr_keeps_splits():
     assert main.hr_bpm_min != original_hr
     assert main.hr_bpm_min == t3[0]
     assert main.hr_bpm_max == t3[1]
+
+
+def test_personalize_plan_rowing_hr_overlays_days_and_alternative():
+    from weekly_plan_schema import personalize_plan_rowing_hr
+
+    profile = AthleteProfile(id=1, label="Jack H", max_hr_bpm=185)
+    plan = parse_weekly_plan(sample_squad_plan_dict())
+    assert plan is not None
+    updated = personalize_plan_rowing_hr(plan, profile)
+    tue = next(d for d in updated.days if d.weekday == "Tuesday")
+    t3 = profile.zone_bpm_range("T3")
+    assert t3 is not None
+    assert tue.rowing is not None
+    assert tue.rowing.segments[0].hr_bpm_min == t3[0]
+    thu = next(d for d in updated.days if d.weekday == "Thursday")
+    assert thu.rowing is not None
+    assert thu.rowing.erg_alternative is not None
+    assert thu.rowing.erg_alternative.segments[0].hr_bpm_min == t3[0]
+    assert plan.days[1].rowing is not None
+    assert tue.rowing.segments[0].split_min == plan.days[1].rowing.segments[0].split_min

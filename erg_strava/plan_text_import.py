@@ -31,7 +31,7 @@ _ATHLETE_DAY_HEADER_RE = re.compile(
     re.I,
 )
 _ATHLETE_SESSION_TYPE_RE = re.compile(
-    r"\*Session Type:\s*(.+?)\*",
+    r"Session Type:\s*(.+)",
     re.I,
 )
 _ATHLETE_ROWING_LINE_RE = re.compile(
@@ -336,7 +336,8 @@ def import_weekly_plan_json_from_text(
         header_line = body.splitlines()[0] if body else ""
         session_m = _ATHLETE_SESSION_TYPE_RE.search(body[:300])
         if session_m:
-            session_type = _session_type_from_header(session_m.group(1))
+            raw_type = session_m.group(1).replace("*", "").strip()
+            session_type = _session_type_from_header(raw_type)
         else:
             session_type = _session_type_from_header(header_line + " " + body[:200])
         day: Dict[str, Any] = {

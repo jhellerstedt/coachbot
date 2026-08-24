@@ -86,3 +86,20 @@ def test_import_athlete_markdown_prose():
     assert wed.gym is not None and wed.gym.category == "upper_core"
     tue = next(d for d in plan.days if d.weekday == "Tuesday")
     assert len(tue.rowing.segments) >= 3
+
+
+def test_import_bold_session_type_on_water():
+    text = """Jack H
+
+### Thursday, 2026-08-27
+**Session Type:** On Water
+Warm-up: 12 min @ Z2/T3, split 2:15–2:20, HR 111–139 bpm, priority: HR
+Main Set: 2×12 min @ Z2/T3, split 2:10–2:15, HR 111–139 bpm, priority: HR
+Cool-down: 12 min @ Z2/T3, split 2:15–2:20, HR 111–139 bpm, priority: HR
+"""
+    data = import_weekly_plan_json_from_text(
+        text, week_start="2026-08-24", personalised=True, greeting="Jack,"
+    )
+    assert data is not None
+    thursday = next(d for d in data["days"] if d["weekday"] == "Thursday")
+    assert thursday["session_type"] == "on_water"

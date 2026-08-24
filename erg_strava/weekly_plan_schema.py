@@ -208,30 +208,54 @@ def _hr_range_for_segment(
     return None
 
 
+def _overlay_segment_hr(seg: RowingSegment, profile: AthleteProfile) -> RowingSegment:
+    rng = _hr_range_for_segment(seg, profile)
+    if rng is None:
+        return seg
+    return replace(seg, hr_bpm_min=rng[0], hr_bpm_max=rng[1])
+
+
+def _overlay_rowing_hr(
+    rowing: RowingSession, profile: AthleteProfile
+) -> RowingSession:
+    alt = rowing.erg_alternative
+    if alt is not None:
+        alt = replace(
+            alt, segments=[_overlay_segment_hr(s, profile) for s in alt.segments]
+        )
+    return replace(
+        rowing,
+        segments=[_overlay_segment_hr(s, profile) for s in rowing.segments],
+        erg_alternative=alt,
+    )
+
+
 def personalize_recommended_erg(
     extra: RecommendedErg,
     profile: AthleteProfile,
 ) -> RecommendedErg:
     """Rewrite extra-session HR from the athlete profile; keep splits."""
-
-    def overlay(seg: RowingSegment) -> RowingSegment:
-        rng = _hr_range_for_segment(seg, profile)
-        if rng is None:
-            return seg
-        return replace(seg, hr_bpm_min=rng[0], hr_bpm_max=rng[1])
-
-    alt = extra.rowing.erg_alternative
-    if alt is not None:
-        alt = replace(alt, segments=[overlay(s) for s in alt.segments])
     return RecommendedErg(
         id=extra.id,
         name=extra.name,
-        rowing=replace(
-            extra.rowing,
-            segments=[overlay(s) for s in extra.rowing.segments],
-            erg_alternative=alt,
-        ),
+        rowing=_overlay_rowing_hr(extra.rowing, profile),
     )
+
+
+def personalize_plan_rowing_hr(
+    plan: WeeklyPlan, profile: AthleteProfile
+) -> WeeklyPlan:
+    """Rewrite day-session HR from the athlete profile; keep splits and structure."""
+    days: List[DayPlan] = []
+    for day in plan.days:
+        if day.rowing is None:
+            days.append(day)
+            continue
+        days.append(replace(day, rowing=_overlay_rowing_hr(day.rowing, profile)))
+    extra = plan.recommended_erg
+    if extra is not None:
+        extra = personalize_recommended_erg(extra, profile)
+    return replace(plan, days=days, recommended_erg=extra)
 
 
 def _gym_set_schema() -> Dict[str, Any]:
@@ -1873,6 +1897,44 @@ def validate_squad_rowing_aligns_with_goals(
     return None
 
 
+def _segment_shape(seg: RowingSegment) -> Tuple[str, str]:
+    return (seg.phase, (seg.duration or "").strip())
+
+
+def _rowing_shape_error(
+    weekday: str,
+    athlete: Optional[RowingSession],
+    squad: Optional[RowingSession],
+    *,
+    label: str = "",
+) -> Optional[str]:
+    prefix = f"{weekday}{label}"
+    if (athlete is None) != (squad is None):
+        return f"{prefix}: rowing session must match squad"
+    if athlete is None or squad is None:
+        return None
+    if len(athlete.segments) != len(squad.segments):
+        return f"{prefix}: rowing segment count must match squad"
+    for a_seg, s_seg in zip(athlete.segments, squad.segments):
+        if _segment_shape(a_seg) != _segment_shape(s_seg):
+            return (
+                f"{prefix}: rowing segment phase/duration must match squad "
+                f"({s_seg.phase} {(s_seg.duration or '').strip()!r})"
+            )
+    a_alt = athlete.erg_alternative
+    s_alt = squad.erg_alternative
+    if (a_alt is None) != (s_alt is None):
+        return f"{prefix}: erg_alternative must match squad"
+    if a_alt is None or s_alt is None:
+        return None
+    if len(a_alt.segments) != len(s_alt.segments):
+        return f"{prefix}: erg_alternative segment count must match squad"
+    for a_seg, s_seg in zip(a_alt.segments, s_alt.segments):
+        if _segment_shape(a_seg) != _segment_shape(s_seg):
+            return f"{prefix}: erg_alternative phase/duration must match squad"
+    return None
+
+
 def validate_athlete_plan_against_squad(
     athlete: WeeklyPlan,
     squad: WeeklyPlan,
@@ -1895,4 +1957,34 @@ def validate_athlete_plan_against_squad(
             s_names = [ex.name for ex in s_day.gym.exercises]
             if a_names != s_names:
                 return f"{a_day.weekday}: gym exercises must match squad order/names"
+            for a_ex, s_ex in zip(a_day.gym.exercises, s_day.gym.exercises):
+                if len(a_ex.sets) != len(s_ex.sets):
+                    return (
+                        f"{a_day.weekday}: {s_ex.name} set count must match squad"
+                    )
+                for a_set, s_set in zip(a_ex.sets, s_ex.sets):
+                    if a_set.reps != s_set.reps or a_set.duration_sec != s_set.duration_sec:
+                        return (
+                            f"{a_day.weekday}: {s_ex.name} set reps/duration "
+                            "must match squad"
+                        )
+        elif (a_day.gym is None) != (s_day.gym is None):
+            return f"{a_day.weekday}: gym session must match squad"
+        rowing_err = _rowing_shape_error(a_day.weekday, a_day.rowing, s_day.rowing)
+        if rowing_err:
+            return rowing_err
+    a_extra = athlete.recommended_erg
+    s_extra = squad.recommended_erg
+    if (a_extra is None) != (s_extra is None):
+        return "recommended_erg must match squad"
+    if a_extra is not None and s_extra is not None:
+        if a_extra.id != s_extra.id:
+            return "recommended_erg id must match squad"
+        extra_err = _rowing_shape_error(
+            "recommended_erg",
+            a_extra.rowing,
+            s_extra.rowing,
+        )
+        if extra_err:
+            return extra_err
     return None
