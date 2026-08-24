@@ -12,6 +12,7 @@ import json
 import os
 import re
 import uuid
+import copy
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -3914,6 +3915,95 @@ def record_gym_session_from_zulip(
     body_weight_kg: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Parse a DM workout transcript and persist under athlete gym_logs/."""
+    records = record_gym_sessions_from_zulip_for_athletes(
+        cache_dir,
+        [(athlete_id, athlete_label, body_weight_kg)],
+        workout_text,
+        token,
+        zulip_message_id=zulip_message_id,
+        zulip_sender_email=zulip_sender_email,
+        recorded_at=recorded_at,
+        session_hint_date=session_hint_date,
+    )
+    return records[0]
+
+
+def record_gym_sessions_from_zulip_for_athletes(
+    cache_dir: Path,
+    recipients: Sequence[Tuple[int, str, Optional[float]]],
+    workout_text: str,
+    token: str,
+    *,
+    zulip_message_id: Optional[int] = None,
+    zulip_sender_email: str = "",
+    recorded_at: Optional[datetime] = None,
+    session_hint_date: Optional[date] = None,
+) -> List[Dict[str, Any]]:
+    """Parse a gym log once and persist an identical copy per recipient."""
+    if not recipients:
+        return []
+
+    recorded_at = recorded_at or datetime.now(timezone.utc)
+    session_date = session_hint_date or activity_local_date(recorded_at)
+    gym_dict: Optional[Dict[str, Any]] = None
+    if zulip_message_id is not None:
+        for athlete_id, _, _ in recipients:
+            existing = find_gym_log_by_zulip_message(
+                cache_dir, athlete_id, zulip_message_id
+            )
+            if existing and existing.get("gym"):
+                gym_dict = copy.deepcopy(existing["gym"])
+                break
+
+    if gym_dict is None:
+        parse_errors: List[str] = []
+        parsed = parse_gym_session_metrics(
+            0,
+            "Gym (Zulip DM)",
+            workout_text,
+            token,
+            body_weight_kg=recipients[0][2],
+            parse_errors=parse_errors,
+        )
+        if parsed is None:
+            detail = parse_errors[0] if parse_errors else "no exercises parsed"
+            raise ValueError(
+                f"Could not parse exercises, sets, or tonnage from message ({detail})."
+            )
+        gym_dict = parsed.to_dict()
+        gym_dict["activity_id"] = 0
+        gym_dict["activity_name"] = "Gym (Zulip DM)"
+
+    return [
+        _persist_zulip_gym_log(
+            cache_dir,
+            athlete_id,
+            athlete_label,
+            gym_dict,
+            zulip_message_id=zulip_message_id,
+            zulip_sender_email=zulip_sender_email,
+            recorded_at=recorded_at,
+            session_date=session_date,
+            raw_text=workout_text,
+            body_weight_kg=body_weight_kg,
+        )
+        for athlete_id, athlete_label, body_weight_kg in recipients
+    ]
+
+
+def _persist_zulip_gym_log(
+    cache_dir: Path,
+    athlete_id: int,
+    athlete_label: str,
+    gym_dict: Dict[str, Any],
+    *,
+    zulip_message_id: Optional[int],
+    zulip_sender_email: str,
+    recorded_at: datetime,
+    session_date: date,
+    raw_text: str,
+    body_weight_kg: Optional[float],
+) -> Dict[str, Any]:
     if zulip_message_id is not None:
         existing = find_gym_log_by_zulip_message(
             cache_dir, athlete_id, zulip_message_id
@@ -3921,27 +4011,7 @@ def record_gym_session_from_zulip(
         if existing:
             return existing
 
-    parse_errors: List[str] = []
-    parsed = parse_gym_session_metrics(
-        0,
-        "Gym (Zulip DM)",
-        workout_text,
-        token,
-        body_weight_kg=body_weight_kg,
-        parse_errors=parse_errors,
-    )
-    if parsed is None:
-        detail = parse_errors[0] if parse_errors else "no exercises parsed"
-        raise ValueError(
-            f"Could not parse exercises, sets, or tonnage from message ({detail})."
-        )
-
-    recorded_at = recorded_at or datetime.now(timezone.utc)
-    session_date = session_hint_date or activity_local_date(recorded_at)
-    gym_dict = parsed.to_dict()
-    gym_dict["activity_id"] = 0
-    gym_dict["activity_name"] = "Gym (Zulip DM)"
-
+    gym_copy = copy.deepcopy(gym_dict)
     record: Dict[str, Any] = {
         "id": str(uuid.uuid4()),
         "athlete_id": athlete_id,
@@ -3951,8 +4021,8 @@ def record_gym_session_from_zulip(
         "source": "zulip_dm",
         "zulip_message_id": zulip_message_id,
         "zulip_sender_email": zulip_sender_email,
-        "raw_text": workout_text[:8000],
-        "gym": gym_dict,
+        "raw_text": raw_text[:8000],
+        "gym": gym_copy,
         "parser_version": GYM_LOG_PARSER_VERSION,
     }
     if body_weight_kg is not None:
@@ -3960,7 +4030,7 @@ def record_gym_session_from_zulip(
     elif any(
         is_bodyweight_gym_exercise(str(ex.get("name") or ""))
         and float(ex.get("tonnage_kg") or 0) <= 0
-        for ex in gym_dict.get("exercises") or []
+        for ex in gym_copy.get("exercises") or []
     ):
         record["bodyweight_note"] = (
             "Bodyweight exercises need your body weight in config for tonnage "

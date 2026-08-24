@@ -2,7 +2,33 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from coach_bot.config import CoachAthleteCfg, resolve_gym_log_recipients
+from generate_training_plan import (
+    GymExerciseMetrics,
+    GymSessionMetrics,
+    GymSetMetrics,
+    find_gym_log_by_zulip_message,
+    load_gym_logs_for_athlete,
+    record_gym_sessions_from_zulip_for_athletes,
+)
+
+
+def _parsed_gym() -> GymSessionMetrics:
+    return GymSessionMetrics(
+        activity_id=0,
+        activity_name="Gym (Zulip DM)",
+        total_tonnage_kg=1500.0,
+        exercises=[
+            GymExerciseMetrics(
+                name="Back squat",
+                max_weight_kg=100.0,
+                tonnage_kg=1500.0,
+                sets=[GymSetMetrics(reps=5, weight_kg=100.0)],
+            )
+        ],
+    )
 
 
 def _athletes() -> list[CoachAthleteCfg]:
@@ -108,3 +134,62 @@ def test_unresolved_mention_is_skipped():
         bot_user_id=99,
     )
     assert [a.id for a in recipients] == [jack.id, sarah.id]
+
+
+def test_multi_athlete_zulip_gym_logs_share_payload(tmp_path, monkeypatch):
+    calls = {"n": 0}
+
+    def fake_parse(*_args, **_kwargs):
+        calls["n"] += 1
+        return _parsed_gym()
+
+    monkeypatch.setattr(
+        "generate_training_plan.parse_gym_session_metrics", fake_parse
+    )
+    recorded = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    records = record_gym_sessions_from_zulip_for_athletes(
+        tmp_path,
+        [(1, "Jack H", 82.0), (2, "Sarah T", 64.0)],
+        "Back squat 5x5 100",
+        "token",
+        zulip_message_id=44001,
+        zulip_sender_email="jack@example.com",
+        recorded_at=recorded,
+        session_hint_date=recorded.date(),
+    )
+    assert calls["n"] == 1
+    assert len(records) == 2
+    assert records[0]["id"] != records[1]["id"]
+    assert records[0]["gym"] == records[1]["gym"]
+    assert records[0]["athlete_id"] == 1
+    assert records[1]["athlete_id"] == 2
+    assert records[0]["body_weight_kg"] == 82.0
+    assert records[1]["body_weight_kg"] == 64.0
+    assert len(load_gym_logs_for_athlete(tmp_path, 1)) == 1
+    assert len(load_gym_logs_for_athlete(tmp_path, 2)) == 1
+
+
+def test_multi_athlete_zulip_gym_logs_are_idempotent(tmp_path, monkeypatch):
+    calls = {"n": 0}
+
+    def fake_parse(*_args, **_kwargs):
+        calls["n"] += 1
+        return _parsed_gym()
+
+    monkeypatch.setattr(
+        "generate_training_plan.parse_gym_session_metrics", fake_parse
+    )
+    kwargs = dict(
+        cache_dir=tmp_path,
+        recipients=[(1, "Jack H", 82.0), (2, "Sarah T", 64.0)],
+        workout_text="Back squat 5x5 100",
+        token="token",
+        zulip_message_id=44001,
+        zulip_sender_email="jack@example.com",
+    )
+    first = record_gym_sessions_from_zulip_for_athletes(**kwargs)
+    second = record_gym_sessions_from_zulip_for_athletes(**kwargs)
+    assert calls["n"] == 1
+    assert [r["id"] for r in first] == [r["id"] for r in second]
+    assert len(load_gym_logs_for_athlete(tmp_path, 1)) == 1
+    assert find_gym_log_by_zulip_message(tmp_path, 1, 44001)["id"] == first[0]["id"]
