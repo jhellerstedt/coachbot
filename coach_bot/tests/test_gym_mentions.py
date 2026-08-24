@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from coach_bot.config import CoachAthleteCfg, resolve_gym_log_recipients
@@ -13,9 +14,11 @@ from generate_training_plan import (
     GymSessionMetrics,
     GymSetMetrics,
     WeeklyPlanRecord,
+    find_gym_log_by_id,
     find_gym_log_by_zulip_message,
     load_gym_logs_for_athlete,
     record_gym_sessions_from_zulip_for_athletes,
+    save_gym_log_record,
 )
 
 
@@ -317,3 +320,91 @@ def test_unmapped_sender_stream_gym_log_credits_mention(tmp_path, monkeypatch):
     assert "Sarah T" in reply
     assert load_gym_logs_for_athlete(tmp_path, 1) == []
     assert len(load_gym_logs_for_athlete(tmp_path, 2)) == 1
+
+
+def _bot_config_patch(handler: CoachMessageHandler):
+    return patch(
+        "coach_bot.handler.load_bot_config",
+        return_value=(None, None, None, None, None, handler.athletes),
+    )
+
+
+def _save_shared_gym_copies(tmp_path: Path, **fields) -> None:
+    gym = {
+        "total_tonnage_kg": 1500,
+        "exercises": [{"name": "Back squat", "max_weight_kg": 100, "tonnage_kg": 1500}],
+    }
+    base = {
+        "session_date": "2026-08-24",
+        "zulip_message_id": 44001,
+        "gym": gym,
+    }
+    base.update(fields)
+    save_gym_log_record(
+        tmp_path,
+        1,
+        {
+            **base,
+            "id": "gym-jack",
+            "athlete_id": 1,
+            "athlete_label": "Jack H",
+        },
+    )
+    save_gym_log_record(
+        tmp_path,
+        2,
+        {
+            **base,
+            "id": "gym-sarah",
+            "athlete_id": 2,
+            "athlete_label": "Sarah T",
+        },
+    )
+
+
+def test_thumbs_down_deletes_only_reactor_copy(tmp_path):
+    _save_shared_gym_copies(tmp_path, coach_reply_zulip_message_id=555010)
+    handler = _handler(tmp_path)
+    with _bot_config_patch(handler):
+        reply = handler.handle_reaction(
+            {
+                "type": "reaction",
+                "op": "add",
+                "emoji_name": "-1",
+                "user_id": 202,
+                "message_id": 555010,
+            }
+        )
+    assert reply is not None
+    assert "gym-sarah" in reply
+    assert find_gym_log_by_id(tmp_path, 2, "gym-sarah") is None
+    assert find_gym_log_by_id(tmp_path, 1, "gym-jack") is not None
+
+
+def test_thumbs_down_by_non_recipient_is_refused(tmp_path):
+    _save_shared_gym_copies(tmp_path, coach_reply_zulip_message_id=555010)
+    handler = _handler(tmp_path)
+    handler.zulip_client.get_raw_message.return_value = {
+        "result": "success",
+        "message": {
+            "sender_id": 99,
+            "content": (
+                "**Logged gym session** (`gym-jack`, 2026-08-24)\n\n"
+                "**Logged gym session** (`gym-sarah`, 2026-08-24)\n"
+            ),
+        },
+    }
+    with _bot_config_patch(handler):
+        reply = handler.handle_reaction(
+            {
+                "type": "reaction",
+                "op": "add",
+                "emoji_name": "-1",
+                "user_id": 303,
+                "message_id": 555010,
+            }
+        )
+    assert reply is not None
+    assert "Only the athlete who logged that session" in reply
+    assert find_gym_log_by_id(tmp_path, 1, "gym-jack") is not None
+    assert find_gym_log_by_id(tmp_path, 2, "gym-sarah") is not None

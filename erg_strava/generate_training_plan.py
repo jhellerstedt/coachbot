@@ -3224,33 +3224,50 @@ def find_gym_log_by_coach_reply_message(
 ) -> Optional[Tuple[int, Dict[str, Any]]]:
     """Return (athlete_id, record) for a coach-bot gym log confirmation message."""
     for athlete_id in iter_cached_athlete_ids(cache_dir):
-        root = gym_logs_dir(cache_dir, athlete_id)
-        if not root.is_dir():
+        rec = _find_gym_log_by_coach_reply_for_athlete(
+            cache_dir, athlete_id, coach_reply_message_id
+        )
+        if rec is not None:
+            return athlete_id, rec
+    return None
+
+
+def _find_gym_log_by_coach_reply_for_athlete(
+    cache_dir: Path, athlete_id: int, coach_reply_message_id: int
+) -> Optional[Dict[str, Any]]:
+    root = gym_logs_dir(cache_dir, athlete_id)
+    if not root.is_dir():
+        return None
+    for path in root.glob("*.json"):
+        try:
+            rec = json.loads(path.read_text())
+        except json.JSONDecodeError:
             continue
-        for path in root.glob("*.json"):
-            try:
-                rec = json.loads(path.read_text())
-            except json.JSONDecodeError:
-                continue
-            if (
-                int(rec.get("coach_reply_zulip_message_id") or 0)
-                == coach_reply_message_id
-            ):
-                return athlete_id, rec
+        if int(rec.get("coach_reply_zulip_message_id") or 0) == coach_reply_message_id:
+            return rec
     return None
 
 
 def find_gym_log_for_reaction_message(
-    cache_dir: Path, message_id: int
+    cache_dir: Path,
+    message_id: int,
+    *,
+    athlete_id: Optional[int] = None,
 ) -> Optional[Tuple[int, Dict[str, Any]]]:
     """Find gym log by coach confirmation id or the athlete's upload message id."""
-    found = find_gym_log_by_coach_reply_message(cache_dir, message_id)
-    if found is not None:
-        return found
-    for athlete_id in iter_cached_athlete_ids(cache_dir):
-        rec = find_gym_log_by_zulip_message(cache_dir, athlete_id, message_id)
+    athlete_ids = (
+        [athlete_id]
+        if athlete_id is not None
+        else list(iter_cached_athlete_ids(cache_dir))
+    )
+    for aid in athlete_ids:
+        rec = _find_gym_log_by_coach_reply_for_athlete(cache_dir, aid, message_id)
         if rec is not None:
-            return athlete_id, rec
+            return aid, rec
+    for aid in athlete_ids:
+        rec = find_gym_log_by_zulip_message(cache_dir, aid, message_id)
+        if rec is not None:
+            return aid, rec
     return None
 
 

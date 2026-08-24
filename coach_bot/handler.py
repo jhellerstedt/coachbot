@@ -276,16 +276,25 @@ class CoachMessageHandler:
     def _handle_gym_thumbs_down(
         self, event: Dict[str, Any], reacted_message_id: int
     ) -> Optional[str]:
+        reactor = self._resolve_reactor_from_reaction(event)
+        if reactor is None:
+            user = event.get("user") or {}
+            return format_unmatched_sender_help(
+                sender_email=str(user.get("email") or ""),
+                sender_full_name=str(user.get("full_name") or ""),
+                sender_id=_reaction_user_id(event),
+            )
         found = find_gym_log_for_reaction_message(
-            self.cache_dir, reacted_message_id
+            self.cache_dir, reacted_message_id, athlete_id=reactor.id
         )
         if found is None:
-            found = self._find_gym_log_from_coach_message(reacted_message_id)
+            found = self._find_gym_log_from_coach_message(
+                reacted_message_id, athlete_id=reactor.id
+            )
         if found is None:
             if self._message_looks_like_gym_log_confirmation(reacted_message_id):
                 return (
-                    "I couldn't find a stored gym log linked to this message "
-                    "(it may already have been removed)."
+                    "Only the athlete who logged that session can remove it with 👎."
                 )
             return None
 
@@ -391,7 +400,10 @@ class CoachMessageHandler:
         return None
 
     def _find_gym_log_from_coach_message(
-        self, coach_reply_message_id: int
+        self,
+        coach_reply_message_id: int,
+        *,
+        athlete_id: Optional[int] = None,
     ) -> Optional[tuple[int, Dict[str, Any]]]:
         if not self.zulip_client:
             return None
@@ -408,14 +420,18 @@ class CoachMessageHandler:
         message = raw.get("message") or {}
         if int(message.get("sender_id") or 0) != self.bot_user_id:
             return None
-        log_id = _parse_logged_gym_session_id(str(message.get("content") or ""))
-        if not log_id:
+        log_ids = _parse_logged_gym_session_ids(str(message.get("content") or ""))
+        if not log_ids:
             return None
         _, _, _, _, _, athletes = load_bot_config()
-        for athlete in athletes or self.athletes:
-            record = find_gym_log_by_id(self.cache_dir, athlete.id, log_id)
-            if record is not None:
-                return athlete.id, record
+        search_athletes = athletes or self.athletes
+        if athlete_id is not None:
+            search_athletes = [a for a in search_athletes if a.id == athlete_id]
+        for log_id in log_ids:
+            for athlete in search_athletes:
+                record = find_gym_log_by_id(self.cache_dir, athlete.id, log_id)
+                if record is not None:
+                    return athlete.id, record
         return None
 
     def _message_looks_like_gym_log_confirmation(self, message_id: int) -> bool:
@@ -1041,11 +1057,17 @@ def _parse_logged_erg_score_id(content: str) -> Optional[str]:
 
 
 def _parse_logged_gym_session_id(content: str) -> Optional[str]:
-    match = _LOGGED_GYM_SESSION_ID_RE.search(content or "")
-    if not match:
-        return None
-    log_id = match.group(1).strip().split(",", 1)[0].strip()
-    return log_id or None
+    ids = _parse_logged_gym_session_ids(content)
+    return ids[0] if ids else None
+
+
+def _parse_logged_gym_session_ids(content: str) -> list[str]:
+    ids: list[str] = []
+    for match in _LOGGED_GYM_SESSION_ID_RE.finditer(content or ""):
+        log_id = match.group(1).strip().split(",", 1)[0].strip()
+        if log_id:
+            ids.append(log_id)
+    return ids
 
 
 def _image_mime_for_url(url: str) -> str:
