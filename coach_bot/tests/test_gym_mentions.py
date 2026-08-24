@@ -19,6 +19,7 @@ from generate_training_plan import (
     load_gym_logs_for_athlete,
     record_gym_sessions_from_zulip_for_athletes,
     save_gym_log_record,
+    apply_rpe_follow_up_from_zulip,
 )
 
 
@@ -408,3 +409,103 @@ def test_thumbs_down_by_non_recipient_is_refused(tmp_path):
     assert "Only the athlete who logged that session" in reply
     assert find_gym_log_by_id(tmp_path, 1, "gym-jack") is not None
     assert find_gym_log_by_id(tmp_path, 2, "gym-sarah") is not None
+
+
+def _save_rpe_pending_copies(tmp_path: Path) -> None:
+    recorded = datetime.now(timezone.utc).isoformat()
+    gym = {
+        "total_tonnage_kg": 1500,
+        "exercises": [
+            {
+                "name": "Back squat",
+                "max_weight_kg": 80,
+                "tonnage_kg": 1500,
+                "sets": [
+                    {"reps": 8, "weight_kg": 40.0},
+                    {"reps": 5, "weight_kg": 80.0},
+                ],
+            },
+            {
+                "name": "Plank",
+                "sets": [{"reps": 1, "weight_kg": 0.0, "duration_sec": 60}],
+            },
+        ],
+    }
+    for athlete_id, log_id, label in (
+        (1, "gym-jack", "Jack H"),
+        (2, "gym-sarah", "Sarah T"),
+    ):
+        save_gym_log_record(
+            tmp_path,
+            athlete_id,
+            {
+                "id": log_id,
+                "athlete_id": athlete_id,
+                "athlete_label": label,
+                "session_date": "2026-08-24",
+                "recorded_at": recorded,
+                "zulip_message_id": 105823,
+                "zulip_sender_email": "jack@example.com",
+                "gym": gym,
+            },
+        )
+
+
+def test_rpe_follow_up_from_sender_updates_tagged_copies(tmp_path):
+    _save_rpe_pending_copies(tmp_path)
+    updated = apply_rpe_follow_up_from_zulip(
+        tmp_path,
+        1,
+        6.0,
+        sender_email="jack@example.com",
+    )
+    assert {r["id"] for r in updated} == {"gym-jack", "gym-sarah"}
+    jack = find_gym_log_by_id(tmp_path, 1, "gym-jack")
+    sarah = find_gym_log_by_id(tmp_path, 2, "gym-sarah")
+    assert jack["gym"]["exercises"][0]["sets"][1]["rpe"] == 6.0
+    assert sarah["gym"]["exercises"][0]["sets"][1]["rpe"] == 6.0
+
+
+def test_rpe_follow_up_from_tagged_athlete_updates_only_their_copy(tmp_path):
+    _save_rpe_pending_copies(tmp_path)
+    updated = apply_rpe_follow_up_from_zulip(
+        tmp_path,
+        2,
+        6.0,
+        sender_email="sarah@example.com",
+    )
+    assert [r["id"] for r in updated] == ["gym-sarah"]
+    jack = find_gym_log_by_id(tmp_path, 1, "gym-jack")
+    sarah = find_gym_log_by_id(tmp_path, 2, "gym-sarah")
+    assert jack["gym"]["exercises"][0]["sets"][1].get("rpe") is None
+    assert sarah["gym"]["exercises"][0]["sets"][1]["rpe"] == 6.0
+
+
+def test_handler_rpe_reply_does_not_call_llm(tmp_path):
+    _save_rpe_pending_copies(tmp_path)
+    handler = _handler(tmp_path)
+    handler.kagi_token = ""
+    with _bot_config_patch(handler), patch(
+        "coach_bot.handler.interpret_coach_message_with_kagi"
+    ) as interpret:
+        reply = handler.handle(
+            {
+                "id": 105825,
+                "sender_id": 101,
+                "sender_email": "jack@example.com",
+                "sender_full_name": "Jack H",
+                "content": "@**coach|99** RPE 6",
+                "mentions": [99],
+                "type": "stream",
+                "display_recipient": "general",
+                "subject": "project-640",
+                "timestamp": datetime.now(timezone.utc).timestamp(),
+            }
+        )
+    interpret.assert_not_called()
+    assert reply is not None
+    assert "RPE 6" in reply
+    assert "Jack H" in reply
+    assert "Sarah T" in reply
+    jack = find_gym_log_by_id(tmp_path, 1, "gym-jack")
+    assert jack["gym"]["exercises"][0]["sets"][1]["rpe"] == 6.0

@@ -3314,6 +3314,69 @@ def save_gym_log_record(
     return path
 
 
+def apply_rpe_follow_up_from_zulip(
+    cache_dir: Path,
+    athlete_id: int,
+    rpe: float,
+    *,
+    sender_email: str = "",
+    now: Optional[datetime] = None,
+    within_hours: float = 72,
+) -> List[Dict[str, Any]]:
+    """Apply an RPE follow-up to the athlete's latest Zulip gym log missing RPE.
+
+    If the sender logged the original message, also copy that RPE onto other
+    athletes' logs that share the same ``zulip_message_id``.
+    """
+    from gym_program import apply_rpe_to_last_working_set, gym_log_missing_rpe
+
+    now_utc = now or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    else:
+        now_utc = now_utc.astimezone(timezone.utc)
+
+    target: Optional[Dict[str, Any]] = None
+    for rec in reversed(load_gym_logs_for_athlete(cache_dir, athlete_id)):
+        if not gym_log_missing_rpe(rec):
+            continue
+        recorded = _parse_activity_start(rec.get("recorded_at"))
+        if recorded is not None:
+            age_h = (now_utc - recorded).total_seconds() / 3600.0
+            if age_h > within_hours:
+                continue
+        target = rec
+        break
+    if target is None:
+        return []
+
+    to_update: List[Tuple[int, Dict[str, Any]]] = [(athlete_id, target)]
+    sender = sender_email.strip().lower()
+    logged_by = str(target.get("zulip_sender_email") or "").strip().lower()
+    msg_id = target.get("zulip_message_id")
+    if sender and logged_by and sender == logged_by and msg_id is not None:
+        try:
+            zulip_message_id = int(msg_id)
+        except (TypeError, ValueError):
+            zulip_message_id = None
+        if zulip_message_id is not None:
+            for other_id in iter_cached_athlete_ids(cache_dir):
+                if other_id == athlete_id:
+                    continue
+                other = find_gym_log_by_zulip_message(
+                    cache_dir, other_id, zulip_message_id
+                )
+                if other is not None and gym_log_missing_rpe(other):
+                    to_update.append((other_id, other))
+
+    updated: List[Dict[str, Any]] = []
+    for aid, rec in to_update:
+        if apply_rpe_to_last_working_set(rec, rpe):
+            save_gym_log_record(cache_dir, aid, rec)
+            updated.append(rec)
+    return updated
+
+
 def load_gym_logs_for_athlete(
     cache_dir: Path,
     athlete_id: int,
