@@ -200,6 +200,46 @@ def resolve_coach_subject(
     return sender, subject
 
 
+def resolve_gym_log_recipients(
+    athletes: List[CoachAthleteCfg],
+    *,
+    sender_email: str,
+    sender_full_name: str = "",
+    sender_id: Optional[int] = None,
+    message_content: str = "",
+    bot_user_id: Optional[int] = None,
+    private_dm: bool = False,
+) -> List[CoachAthleteCfg]:
+    """Athletes who should receive a copy of a gym log from this message.
+
+    Stream: sender (if mapped) then every other mapped @-mention.
+    Private DMs: sender only; mentions are ignored.
+    """
+    sender = resolve_athlete_for_sender(
+        athletes,
+        sender_email=sender_email,
+        sender_full_name=sender_full_name,
+        sender_id=sender_id,
+    )
+    if private_dm:
+        return [sender] if sender is not None else []
+
+    recipients: List[CoachAthleteCfg] = []
+    if sender is not None:
+        recipients.append(sender)
+    for mention_name, mention_uid in extract_zulip_user_mentions(message_content):
+        if bot_user_id is not None and mention_uid == bot_user_id:
+            continue
+        athlete = resolve_athlete_from_mention(
+            athletes,
+            mention_name=mention_name,
+            mention_user_id=mention_uid,
+        )
+        if athlete is not None and athlete not in recipients:
+            recipients.append(athlete)
+    return recipients
+
+
 def resolve_athlete_for_sender(
     athletes: List[CoachAthleteCfg],
     *,

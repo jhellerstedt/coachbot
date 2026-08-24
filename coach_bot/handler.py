@@ -31,7 +31,7 @@ from generate_training_plan import (
     plan_for_date,
     record_erg_score_from_images,
     record_erg_score_from_text,
-    record_gym_session_from_zulip,
+    record_gym_sessions_from_zulip_for_athletes,
     set_erg_score_coach_reply_message_id,
     set_gym_log_coach_reply_message_id,
     week_for_date,
@@ -53,6 +53,7 @@ from coach_bot.config import (
     load_bot_config,
     resolve_athlete_for_sender,
     resolve_coach_subject,
+    resolve_gym_log_recipients,
     update_athlete_profile_in_config,
 )
 from coach_bot.erg_score import (
@@ -95,14 +96,14 @@ class CoachMessageHandler:
         self.athletes = list(athletes or [])
         self._bot_mention_res = _bot_mention_patterns(bot_full_name)
         self._pending_erg_log: Optional[tuple[int, str]] = None
-        self._pending_gym_log: Optional[tuple[int, str]] = None
+        self._pending_gym_log: Optional[list[tuple[int, str]]] = None
 
     def consume_pending_erg_log(self) -> Optional[tuple[int, str]]:
         pending = self._pending_erg_log
         self._pending_erg_log = None
         return pending
 
-    def consume_pending_gym_log(self) -> Optional[tuple[int, str]]:
+    def consume_pending_gym_log(self) -> Optional[list[tuple[int, str]]]:
         pending = self._pending_gym_log
         self._pending_gym_log = None
         return pending
@@ -121,15 +122,15 @@ class CoachMessageHandler:
 
     def register_gym_log_coach_reply(self, coach_reply_message_id: int) -> None:
         pending = self.consume_pending_gym_log()
-        if pending is None:
+        if not pending:
             return
-        athlete_id, log_id = pending
-        set_gym_log_coach_reply_message_id(
-            self.cache_dir,
-            athlete_id,
-            log_id,
-            coach_reply_message_id,
-        )
+        for athlete_id, log_id in pending:
+            set_gym_log_coach_reply_message_id(
+                self.cache_dir,
+                athlete_id,
+                log_id,
+                coach_reply_message_id,
+            )
 
     def _message_topic(self, message: Dict[str, Any]) -> str:
         return (message.get("subject") or "").strip()
@@ -275,16 +276,25 @@ class CoachMessageHandler:
     def _handle_gym_thumbs_down(
         self, event: Dict[str, Any], reacted_message_id: int
     ) -> Optional[str]:
+        reactor = self._resolve_reactor_from_reaction(event)
+        if reactor is None:
+            user = event.get("user") or {}
+            return format_unmatched_sender_help(
+                sender_email=str(user.get("email") or ""),
+                sender_full_name=str(user.get("full_name") or ""),
+                sender_id=_reaction_user_id(event),
+            )
         found = find_gym_log_for_reaction_message(
-            self.cache_dir, reacted_message_id
+            self.cache_dir, reacted_message_id, athlete_id=reactor.id
         )
         if found is None:
-            found = self._find_gym_log_from_coach_message(reacted_message_id)
+            found = self._find_gym_log_from_coach_message(
+                reacted_message_id, athlete_id=reactor.id
+            )
         if found is None:
             if self._message_looks_like_gym_log_confirmation(reacted_message_id):
                 return (
-                    "I couldn't find a stored gym log linked to this message "
-                    "(it may already have been removed)."
+                    "Only the athlete who logged that session can remove it with 👎."
                 )
             return None
 
@@ -390,7 +400,10 @@ class CoachMessageHandler:
         return None
 
     def _find_gym_log_from_coach_message(
-        self, coach_reply_message_id: int
+        self,
+        coach_reply_message_id: int,
+        *,
+        athlete_id: Optional[int] = None,
     ) -> Optional[tuple[int, Dict[str, Any]]]:
         if not self.zulip_client:
             return None
@@ -407,14 +420,18 @@ class CoachMessageHandler:
         message = raw.get("message") or {}
         if int(message.get("sender_id") or 0) != self.bot_user_id:
             return None
-        log_id = _parse_logged_gym_session_id(str(message.get("content") or ""))
-        if not log_id:
+        log_ids = _parse_logged_gym_session_ids(str(message.get("content") or ""))
+        if not log_ids:
             return None
         _, _, _, _, _, athletes = load_bot_config()
-        for athlete in athletes or self.athletes:
-            record = find_gym_log_by_id(self.cache_dir, athlete.id, log_id)
-            if record is not None:
-                return athlete.id, record
+        search_athletes = athletes or self.athletes
+        if athlete_id is not None:
+            search_athletes = [a for a in search_athletes if a.id == athlete_id]
+        for log_id in log_ids:
+            for athlete in search_athletes:
+                record = find_gym_log_by_id(self.cache_dir, athlete.id, log_id)
+                if record is not None:
+                    return athlete.id, record
         return None
 
     def _message_looks_like_gym_log_confirmation(self, message_id: int) -> bool:
@@ -837,7 +854,18 @@ class CoachMessageHandler:
         except Exception as exc:
             return f"Sorry, I could not reach the LLM API: {exc}"
         reply = interpretation.reply.strip()
-        if interpretation.intent == "gym_session_log" and subject:
+        recipients = resolve_gym_log_recipients(
+            athletes or self.athletes,
+            sender_email=str(message.get("sender_email") or ""),
+            sender_full_name=str(message.get("sender_full_name") or ""),
+            sender_id=int(message["sender_id"])
+            if message.get("sender_id") is not None
+            else None,
+            message_content=str(message.get("content") or ""),
+            bot_user_id=self.bot_user_id,
+            private_dm=private_dm,
+        )
+        if interpretation.intent == "gym_session_log" and recipients:
             session_hint = today
             if interpretation.session_date:
                 try:
@@ -847,44 +875,65 @@ class CoachMessageHandler:
                 except ValueError:
                     session_hint = today
             try:
-                gym_record = record_gym_session_from_zulip(
+                gym_records = record_gym_sessions_from_zulip_for_athletes(
                     self.cache_dir,
-                    subject.id,
-                    subject.label,
+                    [(a.id, a.label, a.body_weight_kg) for a in recipients],
                     interpretation.workout_text or text,
                     self.kagi_token,
                     zulip_message_id=zulip_message_id,
                     zulip_sender_email=str(message.get("sender_email") or ""),
                     recorded_at=ref,
                     session_hint_date=session_hint,
-                    body_weight_kg=subject.body_weight_kg,
                 )
-                log_id = str(gym_record.get("id") or "")
-                if log_id:
-                    self._pending_gym_log = (subject.id, log_id)
+                pending = [
+                    (int(rec["athlete_id"]), str(rec["id"]))
+                    for rec in gym_records
+                    if rec.get("id")
+                ]
+                if pending:
+                    self._pending_gym_log = pending
                 self._react_thumbs_up(message)
-                log_note = format_gym_log_confirmation(gym_record)
-                if log_note not in reply:
-                    reply = f"{reply}\n\n{log_note}" if reply else log_note
-                prescribed_section = prescribed_gym_section_for_log(
-                    self.cache_dir,
-                    subject.id,
-                    session_hint,
-                )
-                comparison_note = format_gym_session_comparison(
-                    self.cache_dir,
-                    subject.id,
-                    gym_record,
-                    prescribed_section=prescribed_section,
-                    body_weight_kg=subject.body_weight_kg,
-                )
-                if comparison_note and comparison_note not in reply:
-                    reply = (
-                        f"{reply}\n\n{comparison_note}" if reply else comparison_note
-                    )
+                athlete_by_id = {a.id: a for a in recipients}
                 from gym_program import format_rpe_follow_up, gym_log_missing_rpe
 
-                if gym_log_missing_rpe(gym_record):
+                for gym_record in gym_records:
+                    athlete = athlete_by_id.get(int(gym_record.get("athlete_id") or 0))
+                    parts: List[str] = []
+                    if athlete is not None:
+                        parts.append(f"**{athlete.label}**")
+                    log_note = format_gym_log_confirmation(gym_record)
+                    parts.append(log_note)
+                    if athlete is not None:
+                        prescribed_section = prescribed_gym_section_for_log(
+                            self.cache_dir,
+                            athlete.id,
+                            session_hint,
+                        )
+                        comparison_note = format_gym_session_comparison(
+                            self.cache_dir,
+                            athlete.id,
+                            gym_record,
+                            prescribed_section=prescribed_section,
+                            body_weight_kg=athlete.body_weight_kg,
+                        )
+                        if comparison_note:
+                            parts.append(comparison_note)
+                    block = "\n\n".join(parts)
+                    if block and block not in reply:
+                        reply = f"{reply}\n\n{block}" if reply else block
+                credited = {
+                    int(rec.get("athlete_id") or 0) for rec in gym_records
+                }
+                for athlete in recipients:
+                    if athlete.id not in credited:
+                        fail_note = (
+                            f"(Could not log gym session for {athlete.label}.)"
+                        )
+                        if fail_note not in reply:
+                            reply = (
+                                f"{reply}\n\n{fail_note}" if reply else fail_note
+                            )
+                if gym_records and gym_log_missing_rpe(gym_records[0]):
                     rpe_note = format_rpe_follow_up()
                     if rpe_note not in reply:
                         reply = f"{reply}\n\n{rpe_note}" if reply else rpe_note
@@ -1008,11 +1057,17 @@ def _parse_logged_erg_score_id(content: str) -> Optional[str]:
 
 
 def _parse_logged_gym_session_id(content: str) -> Optional[str]:
-    match = _LOGGED_GYM_SESSION_ID_RE.search(content or "")
-    if not match:
-        return None
-    log_id = match.group(1).strip().split(",", 1)[0].strip()
-    return log_id or None
+    ids = _parse_logged_gym_session_ids(content)
+    return ids[0] if ids else None
+
+
+def _parse_logged_gym_session_ids(content: str) -> list[str]:
+    ids: list[str] = []
+    for match in _LOGGED_GYM_SESSION_ID_RE.finditer(content or ""):
+        log_id = match.group(1).strip().split(",", 1)[0].strip()
+        if log_id:
+            ids.append(log_id)
+    return ids
 
 
 def _image_mime_for_url(url: str) -> str:
