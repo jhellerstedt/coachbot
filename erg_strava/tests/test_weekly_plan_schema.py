@@ -407,6 +407,33 @@ def test_validate_athlete_must_match_squad_gym_exercises():
     assert "gym exercises" in err
 
 
+def test_validate_athlete_rejects_warmup_duration_mismatch():
+    squad = parse_weekly_plan(sample_squad_plan_dict())
+    assert squad is not None
+    data = json.loads(json.dumps(sample_squad_plan_dict()))
+    data["personalised"] = True
+    data["days"][1]["rowing"]["segments"][0]["duration"] = "12 min"
+    athlete = parse_weekly_plan(data)
+    assert athlete is not None
+    err = validate_athlete_plan_against_squad(athlete, squad)
+    assert err is not None
+    assert "duration" in err.lower() or "Tuesday" in err
+
+
+def test_validate_athlete_rejects_missing_recommended_erg():
+    squad_data = sample_squad_plan_dict()
+    squad_data["recommended_erg"] = _recommended_erg_dict()
+    squad = parse_weekly_plan(squad_data)
+    assert squad is not None
+    athlete_data = json.loads(json.dumps(sample_squad_plan_dict()))
+    athlete_data["personalised"] = True
+    athlete = parse_weekly_plan(athlete_data)
+    assert athlete is not None
+    err = validate_athlete_plan_against_squad(athlete, squad)
+    assert err is not None
+    assert "recommended" in err.lower()
+
+
 def test_round_trip_dict():
     plan = parse_weekly_plan(sample_squad_plan_dict())
     assert plan is not None

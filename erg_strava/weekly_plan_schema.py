@@ -1873,6 +1873,44 @@ def validate_squad_rowing_aligns_with_goals(
     return None
 
 
+def _segment_shape(seg: RowingSegment) -> Tuple[str, str]:
+    return (seg.phase, (seg.duration or "").strip())
+
+
+def _rowing_shape_error(
+    weekday: str,
+    athlete: Optional[RowingSession],
+    squad: Optional[RowingSession],
+    *,
+    label: str = "",
+) -> Optional[str]:
+    prefix = f"{weekday}{label}"
+    if (athlete is None) != (squad is None):
+        return f"{prefix}: rowing session must match squad"
+    if athlete is None or squad is None:
+        return None
+    if len(athlete.segments) != len(squad.segments):
+        return f"{prefix}: rowing segment count must match squad"
+    for a_seg, s_seg in zip(athlete.segments, squad.segments):
+        if _segment_shape(a_seg) != _segment_shape(s_seg):
+            return (
+                f"{prefix}: rowing segment phase/duration must match squad "
+                f"({s_seg.phase} {(s_seg.duration or '').strip()!r})"
+            )
+    a_alt = athlete.erg_alternative
+    s_alt = squad.erg_alternative
+    if (a_alt is None) != (s_alt is None):
+        return f"{prefix}: erg_alternative must match squad"
+    if a_alt is None or s_alt is None:
+        return None
+    if len(a_alt.segments) != len(s_alt.segments):
+        return f"{prefix}: erg_alternative segment count must match squad"
+    for a_seg, s_seg in zip(a_alt.segments, s_alt.segments):
+        if _segment_shape(a_seg) != _segment_shape(s_seg):
+            return f"{prefix}: erg_alternative phase/duration must match squad"
+    return None
+
+
 def validate_athlete_plan_against_squad(
     athlete: WeeklyPlan,
     squad: WeeklyPlan,
@@ -1895,4 +1933,34 @@ def validate_athlete_plan_against_squad(
             s_names = [ex.name for ex in s_day.gym.exercises]
             if a_names != s_names:
                 return f"{a_day.weekday}: gym exercises must match squad order/names"
+            for a_ex, s_ex in zip(a_day.gym.exercises, s_day.gym.exercises):
+                if len(a_ex.sets) != len(s_ex.sets):
+                    return (
+                        f"{a_day.weekday}: {s_ex.name} set count must match squad"
+                    )
+                for a_set, s_set in zip(a_ex.sets, s_ex.sets):
+                    if a_set.reps != s_set.reps or a_set.duration_sec != s_set.duration_sec:
+                        return (
+                            f"{a_day.weekday}: {s_ex.name} set reps/duration "
+                            "must match squad"
+                        )
+        elif (a_day.gym is None) != (s_day.gym is None):
+            return f"{a_day.weekday}: gym session must match squad"
+        rowing_err = _rowing_shape_error(a_day.weekday, a_day.rowing, s_day.rowing)
+        if rowing_err:
+            return rowing_err
+    a_extra = athlete.recommended_erg
+    s_extra = squad.recommended_erg
+    if (a_extra is None) != (s_extra is None):
+        return "recommended_erg must match squad"
+    if a_extra is not None and s_extra is not None:
+        if a_extra.id != s_extra.id:
+            return "recommended_erg id must match squad"
+        extra_err = _rowing_shape_error(
+            "recommended_erg",
+            a_extra.rowing,
+            s_extra.rowing,
+        )
+        if extra_err:
+            return extra_err
     return None
