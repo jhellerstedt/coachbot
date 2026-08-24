@@ -808,6 +808,85 @@ def format_rpe_follow_up() -> str:
     )
 
 
+_RPE_WORD_VALUES = {
+    "easy": 5.0,
+    "moderate": 7.0,
+    "hard": 8.5,
+    "max": 10.0,
+    "max effort": 10.0,
+    "maximum effort": 10.0,
+}
+_RPE_NUMBER_RE = re.compile(
+    r"^(?:rpe\s*)?(\d+(?:\.\d+)?)(?:\s*/\s*10)?$",
+    re.I,
+)
+
+
+def parse_rpe_follow_up_reply(text: str) -> Optional[float]:
+    """Parse a short RPE follow-up such as 'RPE 6' or 'hard'. Else None."""
+    body = " ".join((text or "").strip().split())
+    if not body:
+        return None
+    lower = body.lower().rstrip(".!")
+    if lower in _RPE_WORD_VALUES:
+        return _RPE_WORD_VALUES[lower]
+    match = _RPE_NUMBER_RE.fullmatch(lower)
+    if not match:
+        return None
+    try:
+        rpe = float(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    if rpe < 1 or rpe > 10:
+        return None
+    return rpe
+
+
+def _is_weighted_working_set(raw: Mapping[str, Any]) -> bool:
+    if raw.get("duration_sec"):
+        return False
+    try:
+        return float(raw.get("weight_kg") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def apply_rpe_to_last_working_set(record: Dict[str, Any], rpe: float) -> bool:
+    """Set rpe on the last weighted working set. Returns True if a set was updated."""
+    gym = record.get("gym")
+    if not isinstance(gym, Mapping):
+        return False
+    last: Optional[Dict[str, Any]] = None
+    for ex in gym.get("exercises") or []:
+        if not isinstance(ex, Mapping):
+            continue
+        for s in ex.get("sets") or []:
+            if isinstance(s, dict) and _is_weighted_working_set(s):
+                last = s
+    if last is None:
+        return False
+    last["rpe"] = float(rpe)
+    return True
+
+
+def format_rpe_recorded_confirmation(
+    records: Sequence[Mapping[str, Any]], rpe: float
+) -> str:
+    labels = [
+        str(rec.get("athlete_label") or rec.get("athlete_id") or "athlete")
+        for rec in records
+    ]
+    ids = [str(rec.get("id") or "") for rec in records]
+    rpe_txt = f"{rpe:g}"
+    if len(records) == 1:
+        suffix = f" (`{ids[0]}`)" if ids[0] else ""
+        return (
+            f"Recorded RPE {rpe_txt} on {labels[0]}'s last working set{suffix}."
+        )
+    named = ", ".join(labels)
+    return f"Recorded RPE {rpe_txt} on the last working set for {named}."
+
+
 def format_lift_review(decisions: Mapping[str, str]) -> str:
     if not decisions:
         return "Gym lift review: no logged lifts to progress."

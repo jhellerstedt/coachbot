@@ -32,6 +32,7 @@ from generate_training_plan import (
     record_erg_score_from_images,
     record_erg_score_from_text,
     record_gym_sessions_from_zulip_for_athletes,
+    apply_rpe_follow_up_from_zulip,
     set_erg_score_coach_reply_message_id,
     set_gym_log_coach_reply_message_id,
     week_for_date,
@@ -184,6 +185,10 @@ class CoachMessageHandler:
             if body and looks_like_erg_score_text(body):
                 return self._handle_erg_score_text(message, ref, body)
             if body:
+                rpe_reply = self._handle_gym_rpe_follow_up(body, message, athlete)
+                if rpe_reply is not None:
+                    return rpe_reply
+            if body:
                 return self._reply_kagi(body, ref, message, private_dm=True)
             return None
 
@@ -200,6 +205,9 @@ class CoachMessageHandler:
                     return elaboration
             if looks_like_erg_score_text(body):
                 return self._handle_erg_score_text(message, ref, body)
+            rpe_reply = self._handle_gym_rpe_follow_up(body, message, athlete)
+            if rpe_reply is not None:
+                return rpe_reply
             nearby = self._try_handle_nearby_erg_screenshot(message, ref, body)
             if nearby is not None:
                 return nearby
@@ -757,6 +765,40 @@ class CoachMessageHandler:
         return truncate_for_zulip(
             header + deterministic + coaching.strip() + footer
         )
+
+    def _handle_gym_rpe_follow_up(
+        self,
+        body: str,
+        message: Dict[str, Any],
+        athlete: Optional[CoachAthleteCfg],
+    ) -> Optional[str]:
+        from gym_program import (
+            format_rpe_recorded_confirmation,
+            parse_rpe_follow_up_reply,
+        )
+
+        rpe = parse_rpe_follow_up_reply(body)
+        if rpe is None:
+            return None
+        if athlete is None:
+            return format_unmatched_sender_help(
+                sender_email=str(message.get("sender_email") or ""),
+                sender_full_name=str(message.get("sender_full_name") or ""),
+                sender_id=int(message["sender_id"])
+                if message.get("sender_id") is not None
+                else None,
+            )
+        records = apply_rpe_follow_up_from_zulip(
+            self.cache_dir,
+            athlete.id,
+            rpe,
+            sender_email=str(message.get("sender_email") or ""),
+        )
+        if not records:
+            return (
+                "I couldn't find a recent gym log missing RPE to attach that to."
+            )
+        return format_rpe_recorded_confirmation(records, rpe)
 
     def _resolve_athlete(self, message: Dict[str, Any]) -> Optional[CoachAthleteCfg]:
         """Reload athlete map from config so edits apply without restarting the bot."""

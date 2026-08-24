@@ -18,7 +18,9 @@ from gym_program import (
     materialize_week,
     median_latest_peak_kg,
     next_gym_week_index,
+    parse_rpe_follow_up_reply,
     personalize_plan_gym_loads,
+    apply_rpe_to_last_working_set,
     progression_decision,
     validate_program,
 )
@@ -250,6 +252,43 @@ def test_gym_log_missing_rpe_and_follow_up():
     text = format_rpe_follow_up()
     assert "RPE" in text
     assert "easy" in text.lower()
+
+
+def test_parse_rpe_follow_up_reply():
+    assert parse_rpe_follow_up_reply("RPE 6") == 6.0
+    assert parse_rpe_follow_up_reply("6") == 6.0
+    assert parse_rpe_follow_up_reply("7.5 / 10") == 7.5
+    assert parse_rpe_follow_up_reply("easy") == 5.0
+    assert parse_rpe_follow_up_reply("moderate") == 7.0
+    assert parse_rpe_follow_up_reply("hard") == 8.5
+    assert parse_rpe_follow_up_reply("max effort") == 10.0
+    assert parse_rpe_follow_up_reply("how was my erg") is None
+    assert parse_rpe_follow_up_reply("Back squat 8r 40, 5r 80") is None
+
+
+def test_apply_rpe_to_last_weighted_set_skips_plank():
+    record = {
+        "gym": {
+            "exercises": [
+                {
+                    "name": "Back squat",
+                    "sets": [
+                        {"reps": 8, "weight_kg": 40.0},
+                        {"reps": 5, "weight_kg": 80.0},
+                    ],
+                },
+                {
+                    "name": "Plank",
+                    "sets": [{"reps": 1, "weight_kg": 0.0, "duration_sec": 60}],
+                },
+            ]
+        }
+    }
+    assert apply_rpe_to_last_working_set(record, 6.0) is True
+    squat_sets = record["gym"]["exercises"][0]["sets"]
+    assert squat_sets[0].get("rpe") is None
+    assert squat_sets[1]["rpe"] == 6.0
+    assert record["gym"]["exercises"][1]["sets"][0].get("rpe") is None
 
 
 def test_lift_logs_from_metrics_use_sets_and_rpe():
