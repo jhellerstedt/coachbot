@@ -208,30 +208,54 @@ def _hr_range_for_segment(
     return None
 
 
+def _overlay_segment_hr(seg: RowingSegment, profile: AthleteProfile) -> RowingSegment:
+    rng = _hr_range_for_segment(seg, profile)
+    if rng is None:
+        return seg
+    return replace(seg, hr_bpm_min=rng[0], hr_bpm_max=rng[1])
+
+
+def _overlay_rowing_hr(
+    rowing: RowingSession, profile: AthleteProfile
+) -> RowingSession:
+    alt = rowing.erg_alternative
+    if alt is not None:
+        alt = replace(
+            alt, segments=[_overlay_segment_hr(s, profile) for s in alt.segments]
+        )
+    return replace(
+        rowing,
+        segments=[_overlay_segment_hr(s, profile) for s in rowing.segments],
+        erg_alternative=alt,
+    )
+
+
 def personalize_recommended_erg(
     extra: RecommendedErg,
     profile: AthleteProfile,
 ) -> RecommendedErg:
     """Rewrite extra-session HR from the athlete profile; keep splits."""
-
-    def overlay(seg: RowingSegment) -> RowingSegment:
-        rng = _hr_range_for_segment(seg, profile)
-        if rng is None:
-            return seg
-        return replace(seg, hr_bpm_min=rng[0], hr_bpm_max=rng[1])
-
-    alt = extra.rowing.erg_alternative
-    if alt is not None:
-        alt = replace(alt, segments=[overlay(s) for s in alt.segments])
     return RecommendedErg(
         id=extra.id,
         name=extra.name,
-        rowing=replace(
-            extra.rowing,
-            segments=[overlay(s) for s in extra.rowing.segments],
-            erg_alternative=alt,
-        ),
+        rowing=_overlay_rowing_hr(extra.rowing, profile),
     )
+
+
+def personalize_plan_rowing_hr(
+    plan: WeeklyPlan, profile: AthleteProfile
+) -> WeeklyPlan:
+    """Rewrite day-session HR from the athlete profile; keep splits and structure."""
+    days: List[DayPlan] = []
+    for day in plan.days:
+        if day.rowing is None:
+            days.append(day)
+            continue
+        days.append(replace(day, rowing=_overlay_rowing_hr(day.rowing, profile)))
+    extra = plan.recommended_erg
+    if extra is not None:
+        extra = personalize_recommended_erg(extra, profile)
+    return replace(plan, days=days, recommended_erg=extra)
 
 
 def _gym_set_schema() -> Dict[str, Any]:
