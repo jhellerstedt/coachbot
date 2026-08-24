@@ -6143,29 +6143,42 @@ def generate_athlete_weekly_plan(
         athlete_profile=athlete_profile,
         prose_fallback=lambda: _call_llm(system, user, token),
     )
-    plan_json = generated.plan_json
-    if plan_json and squad_plan_json and include_lifting:
-        from gym_program import load_program_from_plan, personalize_plan_gym_loads
+    greeting = athlete_label.split()[0] + ","
+    proposal = generated.plan_json
+    if proposal is None and squad_plan_json and generated.plan_text.strip():
+        from weekly_plan_harness import import_prose_plan_json
 
-        plan_json = personalize_plan_gym_loads(
-            plan_json,
+        proposal = import_prose_plan_json(
+            generated.plan_text,
+            week_start=plan_week.week_start.isoformat(),
+            personalised=True,
+            greeting=greeting,
+        )
+    if squad_plan_json:
+        from athlete_plan_lock import lock_athlete_plan_to_squad
+        from weekly_plan_schema import (
+            parse_weekly_plan,
+            render_plan_text,
+            validate_athlete_plan_against_squad,
+        )
+
+        locked = lock_athlete_plan_to_squad(
             squad_plan_json,
+            proposal_json=proposal,
+            athlete_profile=athlete_profile,
             lift_logs_by_exercise=lift_logs_by_exercise,
-            program=load_program_from_plan(squad_plan_json),
+            greeting=greeting,
+            include_lifting=include_lifting,
         )
-    if plan_json and squad_plan_json:
-        from session_library import copy_recommended_erg_from_squad
-
-        plan_json = copy_recommended_erg_from_squad(
-            plan_json, squad_plan_json, profile=athlete_profile
-        )
-    if plan_json is not None and plan_json is not generated.plan_json:
-        from weekly_plan_schema import parse_weekly_plan, render_plan_text
-
-        parsed = parse_weekly_plan(plan_json)
+        parsed = parse_weekly_plan(locked)
+        squad_parsed = parse_weekly_plan(squad_plan_json)
         if parsed is not None:
+            if squad_parsed is not None:
+                err = validate_athlete_plan_against_squad(parsed, squad_parsed)
+                if err:
+                    print(f"Athlete plan lock validator: {err}", flush=True)
             return GeneratedWeeklyPlan(
-                plan_json=plan_json,
+                plan_json=locked,
                 plan_text=render_plan_text(parsed, absolute_hr_bpm=False),
             )
     return generated
@@ -6538,6 +6551,24 @@ def send_weekly_athlete_plan_dms(
             )
             if align_log.strip():
                 print(align_log, flush=True)
+            if athlete_plan_json is None and squad_plan_json:
+                from athlete_plan_lock import lock_athlete_plan_to_squad
+
+                try:
+                    athlete_plan_json = lock_athlete_plan_to_squad(
+                        squad_plan_json,
+                        proposal_json=generated.plan_json,
+                        athlete_profile=athlete._athlete_profile(),
+                        lift_logs_by_exercise=athlete_lift_logs,
+                        greeting=athlete.label.split()[0] + ",",
+                        include_lifting=include_lifting,
+                    )
+                except ValueError as exc:
+                    print(
+                        f"Weekly plan DM skipped for {athlete.label}: {exc}",
+                        flush=True,
+                    )
+                    continue
             if athlete_plan_json is not None:
                 plan_body = finalize_plan_text_for_display(
                     generated.plan_text, athlete_plan_json
@@ -6557,7 +6588,12 @@ def send_weekly_athlete_plan_dms(
                         athlete_plan_json,
                     )
             else:
-                plan_body = generated.plan_text
+                print(
+                    f"Weekly plan DM skipped for {athlete.label}: "
+                    "no structured plan JSON",
+                    flush=True,
+                )
+                continue
             volume_block = format_last_week_volume_for_dm(
                 cache_dir, athlete.id, review_week
             )
