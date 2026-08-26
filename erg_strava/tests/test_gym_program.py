@@ -19,6 +19,8 @@ from gym_program import (
     median_latest_peak_kg,
     next_gym_week_index,
     parse_rpe_follow_up_reply,
+    extract_session_rpe_from_transcript,
+    overlay_session_rpe_on_record,
     personalize_plan_gym_loads,
     apply_rpe_to_last_working_set,
     progression_decision,
@@ -252,6 +254,62 @@ def test_gym_log_missing_rpe_and_follow_up():
     text = format_rpe_follow_up()
     assert "RPE" in text
     assert "easy" in text.lower()
+
+
+def test_extract_session_rpe_from_transcript():
+    assert extract_session_rpe_from_transcript(
+        "Back squat\n8r 40, 5r 80\nRPE 4"
+    ) == 4.0
+    assert extract_session_rpe_from_transcript("easy") == 5.0
+    assert extract_session_rpe_from_transcript("Back squat\n8r 40\n6") is None
+    assert extract_session_rpe_from_transcript("8r 40, 5r 80") is None
+
+
+def test_gym_log_missing_rpe_only_checks_last_weighted_set():
+    record = {
+        "gym": {
+            "exercises": [
+                {
+                    "name": "Back squat",
+                    "sets": [
+                        {"reps": 8, "weight_kg": 40.0},
+                        {"reps": 5, "weight_kg": 80.0, "rpe": 4.0},
+                    ],
+                },
+                {
+                    "name": "Plank",
+                    "sets": [{"reps": 1, "weight_kg": 0.0, "duration_sec": 60}],
+                },
+            ]
+        }
+    }
+    assert gym_log_missing_rpe(record) is False
+
+
+def test_overlay_session_rpe_on_record_last_set():
+    record = {
+        "gym": {
+            "exercises": [
+                {
+                    "name": "Back squat",
+                    "sets": [
+                        {"reps": 8, "weight_kg": 40.0},
+                        {"reps": 5, "weight_kg": 80.0},
+                    ],
+                },
+                {
+                    "name": "Plank",
+                    "sets": [{"reps": 1, "weight_kg": 0.0, "duration_sec": 60}],
+                },
+            ]
+        }
+    }
+    assert overlay_session_rpe_on_record(record, "RPE 4") is True
+    squat_sets = record["gym"]["exercises"][0]["sets"]
+    assert squat_sets[0].get("rpe") is None
+    assert squat_sets[1]["rpe"] == 4.0
+    assert overlay_session_rpe_on_record(record, "RPE 7") is False
+    assert squat_sets[1]["rpe"] == 4.0
 
 
 def test_parse_rpe_follow_up_reply():

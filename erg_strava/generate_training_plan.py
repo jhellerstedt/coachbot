@@ -1754,6 +1754,17 @@ def collect_gym_descriptions(
     return out
 
 
+def _apply_session_rpe_from_transcript(
+    metrics: GymSessionMetrics, transcript: str
+) -> GymSessionMetrics:
+    from gym_program import overlay_session_rpe_on_record
+
+    rec = {"gym": metrics.to_dict()}
+    if overlay_session_rpe_on_record(rec, transcript):
+        return GymSessionMetrics.from_dict(rec["gym"])
+    return metrics
+
+
 def parse_gym_session_metrics(
     activity_id: int,
     activity_name: str,
@@ -1786,14 +1797,18 @@ def parse_gym_session_metrics(
                 exercises=parsed.exercises,
                 assumptions=parsed.assumptions,
             )
-            return finalize_gym_session_metrics(metrics, body_weight_kg)
+            return _apply_session_rpe_from_transcript(
+                finalize_gym_session_metrics(metrics, body_weight_kg), desc
+            )
 
         parsed = parse_gym_session_with_llm_harness(
             activity_id, activity_name, desc, token, parse_errors=parse_errors
         )
         if parsed is not None:
             parsed = reconcile_gym_metrics_with_transcript(parsed, desc)
-            return finalize_gym_session_metrics(parsed, body_weight_kg)
+            return _apply_session_rpe_from_transcript(
+                finalize_gym_session_metrics(parsed, body_weight_kg), desc
+            )
 
         parsed = parse_coach_gym_transcript(desc)
         if parsed:
@@ -1805,7 +1820,9 @@ def parse_gym_session_metrics(
                 exercises=parsed.exercises,
                 assumptions=parsed.assumptions,
             )
-            return finalize_gym_session_metrics(metrics, body_weight_kg)
+            return _apply_session_rpe_from_transcript(
+                finalize_gym_session_metrics(metrics, body_weight_kg), desc
+            )
     except ImportError as exc:
         if parse_errors is not None:
             parse_errors.append(str(exc))
