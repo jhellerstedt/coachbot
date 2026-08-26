@@ -127,7 +127,12 @@ def main() -> None:
                 if message.get("type") == "stream"
                 else topic
             )
-            _reply(handler.zulip_client, reply, message, stream=stream, topic=reply_topic)
+            coach_msg_id = _reply(handler.zulip_client, reply, message, stream=stream, topic=reply_topic)
+            if coach_msg_id is not None:
+                handler.register_erg_log_coach_reply(coach_msg_id)
+                handler.register_gym_log_coach_reply(coach_msg_id)
+                if message.get("type") == "stream":
+                    handler.activate_listen_window(message)
             return
         if event.get("type") != "message":
             return
@@ -145,6 +150,8 @@ def main() -> None:
             if coach_msg_id is not None:
                 handler.register_erg_log_coach_reply(coach_msg_id)
                 handler.register_gym_log_coach_reply(coach_msg_id)
+                if message.get("type") == "stream":
+                    handler.activate_listen_window(message)
 
     client.call_on_each_event(process_event, event_types=["message", "reaction"])
 
