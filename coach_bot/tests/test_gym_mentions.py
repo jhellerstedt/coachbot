@@ -248,6 +248,34 @@ def _patch_gym_log_handler(monkeypatch, handler: CoachMessageHandler):
     )
 
 
+def test_stream_gym_with_last_set_rpe_does_not_ask(tmp_path, monkeypatch):
+    handler = _handler(tmp_path)
+    _patch_gym_log_handler(monkeypatch, handler)
+    parsed = _parsed_gym()
+    parsed.exercises[0].sets[0].rpe = 4.0
+    monkeypatch.setattr(
+        "generate_training_plan.parse_gym_session_metrics",
+        lambda *_args, **_kwargs: parsed,
+    )
+    ref = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    reply = handler._reply_kagi(
+        "gym: Back squat 5x5 100\nRPE 4",
+        ref,
+        {
+            "id": 9004,
+            "sender_id": 101,
+            "sender_email": "jack@example.com",
+            "sender_full_name": "Jack H",
+            "content": "@**coach|99** gym: Back squat 5x5 100\nRPE 4",
+            "type": "stream",
+            "timestamp": ref.timestamp(),
+        },
+    )
+    assert "How hard" not in reply
+    jack = load_gym_logs_for_athlete(tmp_path, 1)[0]
+    assert jack["gym"]["exercises"][0]["sets"][0]["rpe"] == 4.0
+
+
 def test_stream_gym_log_credits_sender_and_mentions(tmp_path, monkeypatch):
     handler = _handler(tmp_path)
     _patch_gym_log_handler(monkeypatch, handler)
@@ -509,3 +537,60 @@ def test_handler_rpe_reply_does_not_call_llm(tmp_path):
     assert "Sarah T" in reply
     jack = find_gym_log_by_id(tmp_path, 1, "gym-jack")
     assert jack["gym"]["exercises"][0]["sets"][1]["rpe"] == 6.0
+
+
+def _stream_msg(**fields):
+    msg = {
+        "id": 106120,
+        "sender_id": 101,
+        "sender_email": "jack@example.com",
+        "sender_full_name": "Jack H",
+        "content": "RPE 4",
+        "type": "stream",
+        "display_recipient": "general",
+        "subject": "project-640",
+        "timestamp": datetime.now(timezone.utc).timestamp(),
+    }
+    msg.update(fields)
+    return msg
+
+
+def test_unmentioned_rpe_in_listen_window_records_without_llm(tmp_path):
+    _save_rpe_pending_copies(tmp_path)
+    handler = _handler(tmp_path)
+    handler.kagi_token = ""
+    handler.activate_listen_window(_stream_msg())
+    with _bot_config_patch(handler), patch(
+        "coach_bot.handler.interpret_coach_message_with_kagi"
+    ) as interpret:
+        reply = handler.handle(_stream_msg(content="RPE 4"))
+    interpret.assert_not_called()
+    assert reply is not None
+    assert "RPE 4" in reply
+    jack = find_gym_log_by_id(tmp_path, 1, "gym-jack")
+    assert jack["gym"]["exercises"][0]["sets"][1]["rpe"] == 4.0
+
+
+def test_unmentioned_rpe_outside_window_is_ignored(tmp_path):
+    _save_rpe_pending_copies(tmp_path)
+    handler = _handler(tmp_path)
+    handler.kagi_token = ""
+    with _bot_config_patch(handler), patch(
+        "coach_bot.handler.interpret_coach_message_with_kagi"
+    ) as interpret:
+        reply = handler.handle(_stream_msg(content="RPE 4"))
+    interpret.assert_not_called()
+    assert reply is None
+    jack = find_gym_log_by_id(tmp_path, 1, "gym-jack")
+    assert jack["gym"]["exercises"][0]["sets"][1].get("rpe") is None
+
+
+def test_unmentioned_chatter_in_window_does_not_reply(tmp_path):
+    handler = _handler(tmp_path)
+    handler.activate_listen_window(_stream_msg())
+    with _bot_config_patch(handler), patch(
+        "coach_bot.handler.should_reply_to_followup", return_value=False
+    ), patch("coach_bot.handler.interpret_coach_message_with_kagi") as interpret:
+        reply = handler.handle(_stream_msg(content="erg tomorrow 7am?"))
+    interpret.assert_not_called()
+    assert reply is None

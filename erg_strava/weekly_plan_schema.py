@@ -513,8 +513,10 @@ GYM_SESSION_HARNESS_INSTRUCTIONS = (
     "8. Omit boilerplate lines (\"gym this morning\", goals, session labels).\n"
     "9. Include every weighted working set the athlete reported; do not merge or drop sets.\n"
     "10. Do not compute tonnage — only list sets. Use assumptions for any ambiguity.\n"
-    "11. If the athlete gave an effort rating, set rpe (1–10) on that set; "
-    "easy≈5, moderate≈7, hard≈8.5, max effort≈10. If none was given, set rpe to null.\n"
+    "11. If the athlete gave an effort rating for a specific set, set rpe (1–10) on that set. "
+    "A session-level rating (e.g. a trailing \"RPE 4\" or easy/moderate/hard) applies only to "
+    "the last weighted working set; easy≈5, moderate≈7, hard≈8.5, max effort≈10. "
+    "If none was given, set rpe to null.\n"
 )
 
 

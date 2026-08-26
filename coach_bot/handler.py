@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -62,7 +62,15 @@ from coach_bot.erg_score import (
     references_nearby_erg_screenshot,
     wants_erg_coaching_elaboration,
 )
+from coach_bot.followup_triage import should_reply_to_followup
 from coach_bot.intents import strip_zulip_mentions, truncate_for_zulip
+from coach_bot.listen_window import (
+    activate_listen_window as persist_listen_window,
+    listen_state_path,
+    listen_window_open,
+    load_listen_state,
+    save_listen_state,
+)
 from coach_bot.zulip_context import (
     collect_same_sender_session_images,
     fetch_topic_context,
@@ -192,28 +200,92 @@ class CoachMessageHandler:
                 return self._reply_kagi(body, ref, message, private_dm=True)
             return None
 
-        if image_urls and self.bot_mentioned(message):
+        mentioned = self.bot_mentioned(message)
+        if image_urls and mentioned:
             return self._handle_erg_score_screenshot(message, image_urls, ref, body)
 
-        if self.bot_mentioned(message) and body:
-            athlete = self._resolve_athlete(message)
-            if athlete and wants_erg_coaching_elaboration(body):
-                elaboration = self._handle_erg_score_elaboration(
-                    message, ref, body, athlete
-                )
-                if elaboration is not None:
-                    return elaboration
-            if looks_like_erg_score_text(body):
-                return self._handle_erg_score_text(message, ref, body)
-            rpe_reply = self._handle_gym_rpe_follow_up(body, message, athlete)
-            if rpe_reply is not None:
-                return rpe_reply
-            nearby = self._try_handle_nearby_erg_screenshot(message, ref, body)
-            if nearby is not None:
-                return nearby
-            return self._reply_kagi(body, ref, message)
+        if mentioned and body:
+            return self._handle_stream_body(body, message, ref)
+
+        if body and self._listen_window_open(message):
+            from gym_program import parse_rpe_follow_up_reply
+
+            if parse_rpe_follow_up_reply(body) is not None:
+                athlete = self._resolve_athlete(message)
+                return self._handle_gym_rpe_follow_up(body, message, athlete)
+            if not self._triage_followup(body):
+                return None
+            return self._handle_stream_body(body, message, ref)
 
         return None
+
+    def _handle_stream_body(
+        self, body: str, message: Dict[str, Any], ref: datetime
+    ) -> Optional[str]:
+        athlete = self._resolve_athlete(message)
+        if athlete and wants_erg_coaching_elaboration(body):
+            elaboration = self._handle_erg_score_elaboration(
+                message, ref, body, athlete
+            )
+            if elaboration is not None:
+                return elaboration
+        if looks_like_erg_score_text(body):
+            return self._handle_erg_score_text(message, ref, body)
+        rpe_reply = self._handle_gym_rpe_follow_up(body, message, athlete)
+        if rpe_reply is not None:
+            return rpe_reply
+        nearby = self._try_handle_nearby_erg_screenshot(message, ref, body)
+        if nearby is not None:
+            return nearby
+        return self._reply_kagi(body, ref, message)
+
+    def activate_listen_window(
+        self, message: Dict[str, Any], *, now: Optional[datetime] = None
+    ) -> None:
+        if message.get("type") != "stream":
+            return
+        stream = message.get("display_recipient") or self.zulip_stream
+        if not isinstance(stream, str) or not stream:
+            return
+        path = listen_state_path(self.cache_dir)
+        state = load_listen_state(path)
+        persist_listen_window(
+            state,
+            stream,
+            self._message_topic(message),
+            now=now or datetime.now(timezone.utc),
+        )
+        save_listen_state(path, state)
+
+    def _listen_window_open(
+        self, message: Dict[str, Any], *, now: Optional[datetime] = None
+    ) -> bool:
+        stream = message.get("display_recipient") or self.zulip_stream
+        if not isinstance(stream, str):
+            return False
+        state = load_listen_state(listen_state_path(self.cache_dir))
+        return listen_window_open(
+            state,
+            stream,
+            self._message_topic(message),
+            now=now or datetime.now(timezone.utc),
+        )
+
+    def _triage_followup(self, body: str) -> bool:
+        token = self.kagi_token
+        if not token:
+            return should_reply_to_followup(body, use_llm=False)
+        try:
+            from openrouter_client import call_openrouter
+        except ImportError:
+            return False
+
+        def llm_call(system: str, user: str) -> str:
+            return call_openrouter(
+                system=system, user=user, api_key=token, timeout=30
+            )
+
+        return should_reply_to_followup(body, llm_call=llm_call)
 
     def handle_reaction(self, event: Dict[str, Any]) -> Optional[str]:
         """Undo an erg or gym log when the athlete thumbs-downs the coach confirmation."""

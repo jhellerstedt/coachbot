@@ -783,6 +783,7 @@ def gym_log_missing_rpe(record: Mapping[str, Any]) -> bool:
     gym = record.get("gym") if isinstance(record, Mapping) else None
     if not isinstance(gym, Mapping):
         return False
+    last: Optional[Mapping[str, Any]] = None
     for ex in gym.get("exercises") or []:
         if not isinstance(ex, Mapping):
             continue
@@ -796,9 +797,10 @@ def gym_log_missing_rpe(record: Mapping[str, Any]) -> bool:
             duration = s.get("duration_sec")
             if duration or weight <= 0:
                 continue
-            if _set_rpe(s) is None:
-                return True
-    return False
+            last = s
+    if last is None:
+        return False
+    return _set_rpe(last) is None
 
 
 def format_rpe_follow_up() -> str:
@@ -867,6 +869,30 @@ def apply_rpe_to_last_working_set(record: Dict[str, Any], rpe: float) -> bool:
         return False
     last["rpe"] = float(rpe)
     return True
+
+
+def extract_session_rpe_from_transcript(text: str) -> Optional[float]:
+    """Last session-level RPE line (``RPE 4`` / ``easy``). Bare numbers are ignored."""
+    last: Optional[float] = None
+    for raw in (text or "").splitlines():
+        line = " ".join(raw.strip().split())
+        if not line:
+            continue
+        lower = line.lower().rstrip(".!")
+        if not (lower.startswith("rpe") or lower in _RPE_WORD_VALUES):
+            continue
+        parsed = parse_rpe_follow_up_reply(line)
+        if parsed is not None:
+            last = parsed
+    return last
+
+
+def overlay_session_rpe_on_record(record: Dict[str, Any], transcript: str) -> bool:
+    """Apply transcript session RPE to the last weighted set if it has none."""
+    rpe = extract_session_rpe_from_transcript(transcript)
+    if rpe is None or not gym_log_missing_rpe(record):
+        return False
+    return apply_rpe_to_last_working_set(record, rpe)
 
 
 def format_rpe_recorded_confirmation(
