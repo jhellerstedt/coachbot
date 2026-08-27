@@ -669,6 +669,7 @@ def ensure_athlete_plan_structured(
         imported,
         include_lifting=True,
         squad_plan_json=None,
+        cached_import=True,
     )
     if finalized is None:
         return record

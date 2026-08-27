@@ -1619,26 +1619,29 @@ def validate_plan_session_constraints(
     plan: WeeklyPlan,
     *,
     phase: Optional[str] = None,
+    skip_duration_caps: bool = False,
 ) -> Optional[str]:
     """Session duration cap and interval rest requirements."""
     for day in plan.days:
         if day.session_type == "gym":
-            mins = estimate_day_session_minutes(day)
-            if mins > GYM_SESSION_CAP_MINUTES:
-                return (
-                    f"{day.weekday}: estimated gym session ~{mins} min exceeds "
-                    f"{GYM_SESSION_CAP_MINUTES} min cap"
-                )
+            if not skip_duration_caps:
+                mins = estimate_day_session_minutes(day)
+                if mins > GYM_SESSION_CAP_MINUTES:
+                    return (
+                        f"{day.weekday}: estimated gym session ~{mins} min exceeds "
+                        f"{GYM_SESSION_CAP_MINUTES} min cap"
+                    )
             continue
         if day.session_type not in ("erg", "on_water"):
             continue
-        mins = estimate_rowing_session_minutes(day.rowing) if day.rowing else 0
-        if mins > SESSION_CAP_MINUTES:
-            return (
-                f"{day.weekday}: estimated erg/rowing session ~{mins} min exceeds "
-                f"{SESSION_CAP_MINUTES} min cap — "
-                "shorten the session or move extra volume to Friday or Saturday"
-            )
+        if not skip_duration_caps:
+            mins = estimate_rowing_session_minutes(day.rowing) if day.rowing else 0
+            if mins > SESSION_CAP_MINUTES:
+                return (
+                    f"{day.weekday}: estimated erg/rowing session ~{mins} min exceeds "
+                    f"{SESSION_CAP_MINUTES} min cap — "
+                    "shorten the session or move extra volume to Friday or Saturday"
+                )
         if day.session_type in ("erg", "on_water"):
             wucd_err = validate_rowing_warmup_cooldown_caps(day)
             if wucd_err:

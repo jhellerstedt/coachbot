@@ -111,6 +111,7 @@ def validate_parsed_weekly_plan(
     goal_tracking: Optional[str] = None,
     phase: Optional[str] = None,
     athlete_profile: Optional[AthleteProfile] = None,
+    cached_import: bool = False,
 ) -> Optional[str]:
     """Return first validation error, or None if the plan is acceptable."""
     err = validate_weekly_plan(plan, include_lifting=include_lifting)
@@ -135,9 +136,13 @@ def validate_parsed_weekly_plan(
         validate_squad_rowing_aligns_with_goals,
     )
 
-    err = validate_plan_session_constraints(plan, phase=phase)
+    err = validate_plan_session_constraints(
+        plan, phase=phase, skip_duration_caps=cached_import
+    )
     if err:
         return err
+    if cached_import:
+        return None
     if athlete_profile is not None:
         err = validate_athlete_hr_zone_consistency(plan, athlete_profile)
         if err:
@@ -186,6 +191,7 @@ def finalize_imported_plan_json(
     phase: Optional[str] = None,
     priority: str = "hr",
     athlete_profile: Optional[AthleteProfile] = None,
+    cached_import: bool = False,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Validate imported JSON; return (dict, error)."""
     parsed = parse_weekly_plan(plan_json)
@@ -206,6 +212,7 @@ def finalize_imported_plan_json(
         goal_tracking=goal_tracking,
         phase=phase,
         athlete_profile=athlete_profile,
+        cached_import=cached_import,
     )
     if err:
         return None, err
