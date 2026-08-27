@@ -15,7 +15,11 @@ from erg_prescription_compare import (
     parse_split_seconds,
     prescribed_rowing_minutes_by_zone,
 )
-from generate_training_plan import save_athlete_weekly_plan, week_bounds_from_monday
+from generate_training_plan import (
+    infer_makeup_prescribed_date,
+    save_athlete_weekly_plan,
+    week_bounds_from_monday,
+)
 from strava_erg_hr_plot import AthleteCfg, athlete_paths, collect_activities_in_weeks, save_index
 from weekly_plan_schema import weekly_plan_to_dict
 
@@ -193,6 +197,51 @@ def test_format_erg_session_comparison_uses_personal_plan(tmp_path: Path):
         date(2026, 6, 23),
     )
     assert "personalised plan" in text
+    assert "2:12–2:17" in text
+
+
+def test_infer_makeup_prescribed_date():
+    logged = date(2026, 8, 27)  # Thursday
+    assert infer_makeup_prescribed_date("made up Tuesday erg this morning", logged) == date(
+        2026, 8, 25
+    )
+    assert infer_makeup_prescribed_date("makeup Tuesday erg", logged) == date(2026, 8, 25)
+    assert infer_makeup_prescribed_date("Tuesday erg this morning", logged) is None
+    assert infer_makeup_prescribed_date("made up erg this morning", logged) is None
+
+
+def test_format_erg_session_comparison_makeup_uses_other_day_plan(tmp_path: Path):
+    week = week_bounds_from_monday(date(2026, 8, 24))
+    athlete_id = 7
+    plan = _tuesday_personal_plan()
+    # Align dates to Aug 24 week and add Thursday on-water day.
+    for day in plan["days"]:
+        if day["weekday"] == "Monday":
+            day["date"] = "2026-08-24"
+        elif day["weekday"] == "Tuesday":
+            day["date"] = "2026-08-25"
+        elif day["weekday"] == "Wednesday":
+            day["date"] = "2026-08-26"
+        elif day["weekday"] == "Thursday":
+            day.update(_thursday_on_water_plan()["days"][3])
+            day["date"] = "2026-08-27"
+    save_athlete_weekly_plan(
+        tmp_path,
+        athlete_id,
+        week,
+        plan_text="Week plan",
+        plan_json=plan,
+    )
+    record = _jack_session_record()
+    record["session_date"] = "2026-08-27"
+    text = format_erg_session_comparison(
+        tmp_path,
+        athlete_id,
+        record,
+        date(2026, 8, 27),
+        prescribed_session_date=date(2026, 8, 25),
+    )
+    assert "Tuesday prescription, makeup on Thursday" in text
     assert "2:12–2:17" in text
 
 

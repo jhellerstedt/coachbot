@@ -425,10 +425,13 @@ def format_erg_session_comparison(
     athlete_id: int,
     record: Mapping[str, Any],
     session_date: date,
+    *,
+    prescribed_session_date: Optional[date] = None,
 ) -> str:
     """Deterministic session vs prescription summary for coach replies."""
+    compare_date = prescribed_session_date or session_date
     plan_text, plan_json, personalised, _ = erg_plan_context_for_date(
-        cache_dir, athlete_id, session_date
+        cache_dir, athlete_id, compare_date
     )
     if not plan_json and not plan_text:
         return ""
@@ -436,7 +439,7 @@ def format_erg_session_comparison(
         from generate_training_plan import session_from_plan
 
         # Prose-only plan: still show section header but skip numeric checks.
-        section = session_from_plan(plan_text, None, session_date)
+        section = session_from_plan(plan_text, None, compare_date)
         if not section:
             return ""
         source = "personalised plan" if personalised else "squad plan"
@@ -446,17 +449,23 @@ def format_erg_session_comparison(
             f"prescribed session.)"
         )
 
-    bullets = compare_erg_session_to_prescription(record, plan_json, session_date)
+    bullets = compare_erg_session_to_prescription(record, plan_json, compare_date)
     if not bullets:
         return ""
     plan = _plan_object(plan_json)
-    day = session_for_date(plan, session_date) if plan else None
+    day = session_for_date(plan, compare_date) if plan else None
     metrics = record.get("metrics") or {}
     _, prescription_source = _prescribed_rowing_segments_for_session(day, metrics)
     source = "personalised plan" if personalised else "squad plan"
     header = f"**Prescription check** ({source}"
     if prescription_source == "erg alternative":
         header += ", erg alternative"
+    if prescribed_session_date and prescribed_session_date != session_date:
+        from generate_training_plan import _WEEKDAY_NAMES
+
+        prescribed_day = _WEEKDAY_NAMES[prescribed_session_date.weekday()]
+        logged_day = _WEEKDAY_NAMES[session_date.weekday()]
+        header += f"; {prescribed_day} prescription, makeup on {logged_day}"
     header += "):\n"
     return header + "\n".join(bullets)
 
