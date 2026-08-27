@@ -103,3 +103,62 @@ Cool-down: 12 min @ Z2/T3, split 2:15–2:20, HR 111–139 bpm, priority: HR
     assert data is not None
     thursday = next(d for d in data["days"] if d["weekday"] == "Thursday")
     assert thursday["session_type"] == "on_water"
+
+
+def test_import_tuesday_interval_with_main_set_header_and_rest_without_priority():
+    from weekly_plan_harness import finalize_imported_plan_json
+
+    text = """Jack H
+
+### Tuesday, 2026-08-25
+**Session Type:** Erg
+**Main Set:** 4×4 min / 2 min rest
+Warm-up: 12 min @ Z2/T3, split 2:15–2:20, HR 111–139 bpm, priority: HR
+Main Set: 4×4 min @ Z4/T6, split 1:58–2:05, HR 137–157 bpm, priority: HR
+Rest: 2 min @ Z1/T1, split 2:20–2:25, HR 92–111 bpm
+Cool-down: 12 min @ Z2/T3, split 2:15–2:20, HR 111–139 bpm, priority: HR
+"""
+    data = import_weekly_plan_json_from_text(
+        text, week_start="2026-08-24", personalised=True, greeting="Jack H"
+    )
+    assert data is not None
+    finalized, err = finalize_imported_plan_json(
+        data, include_lifting=True, squad_plan_json=None
+    )
+    assert finalized is not None, err
+    plan = parse_weekly_plan(finalized)
+    assert plan is not None
+    tue = next(d for d in plan.days if d.weekday == "Tuesday")
+    assert tue.session_type == "erg"
+    main = next(s for s in tue.rowing.segments if s.phase == "main_set")
+    assert "4×4 min / 2 min rest" in (main.duration or "")
+    rest = [s for s in tue.rowing.segments if s.phase == "rest"]
+    assert len(rest) == 1
+
+
+def test_load_athlete_weekly_plan_backfills_plan_json(tmp_path):
+    from datetime import date
+
+    from generate_training_plan import (
+        extract_session_for_date,
+        load_athlete_weekly_plan,
+        save_athlete_weekly_plan,
+        week_bounds_from_monday,
+    )
+
+    week = week_bounds_from_monday(date(2026, 7, 20))
+    save_athlete_weekly_plan(
+        tmp_path,
+        53603359,
+        week,
+        ATHLETE_BUILD_PROSE,
+    )
+    record = load_athlete_weekly_plan(tmp_path, 53603359, week.week_id)
+    assert record is not None
+    assert isinstance(record.get("plan_json"), dict)
+    md_text = ATHLETE_BUILD_PROSE.replace(
+        "**Tuesday, 2026-07-21**", "### Tuesday, 2026-07-21"
+    )
+    section = extract_session_for_date(md_text, date(2026, 7, 21))
+    assert section is not None
+    assert "Warm-up" in section[1]

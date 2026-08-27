@@ -534,6 +534,8 @@ def load_athlete_weekly_plan(
         return None
     if not isinstance(data, dict) or not data.get("plan_text"):
         return None
+    if not isinstance(data.get("plan_json"), dict):
+        data = ensure_athlete_plan_structured(cache_dir, athlete_id, data)
     return data
 
 
@@ -590,6 +592,15 @@ def extract_session_for_date(
         return None
     others = [n for n in _WEEKDAY_NAMES if n != day_name]
     next_days = "|".join(re.escape(n) for n in others)
+    md3_pattern = (
+        rf"(?ms)^\s*#{{1,3}}\s*{re.escape(day_name)}\s*,\s*{re.escape(d.isoformat())}"
+        rf"\s*\n(.*?)(?=^\s*#{{1,3}}\s*(?:{next_days})\b|\Z)"
+    )
+    m = re.search(md3_pattern, plan_text)
+    if m:
+        section = m.group(1).strip()
+        if section:
+            return day_name, section
     pattern = (
         rf"(?mi)^\s*{re.escape(day_name)}\b[:\s\-–—]*(.*?)"
         rf"(?=^\s*(?:{next_days})\b|\Z)"
@@ -614,6 +625,63 @@ def session_from_plan(
         if from_json is not None:
             return from_json
     return extract_session_for_date(plan_text, d)
+
+
+def ensure_athlete_plan_structured(
+    cache_dir: Path,
+    athlete_id: int,
+    record: Dict[str, Any],
+    *,
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """Import plan_json from cached plan_text when missing; optionally persist."""
+    from weekly_plan_harness import finalize_imported_plan_json, import_prose_plan_json
+    from weekly_plan_schema import parse_weekly_plan
+
+    existing = record.get("plan_json")
+    if isinstance(existing, dict) and parse_weekly_plan(existing) is not None:
+        return record
+
+    plan_text = str(record.get("plan_text") or "").strip()
+    week_start = str(record.get("week_start") or record.get("week_id", ""))[:10]
+    if not plan_text or len(week_start) < 10:
+        return record
+
+    greeting = None
+    first = plan_text.splitlines()[0].strip() if plan_text else ""
+    if first and not re.match(
+        r"^(?:#{1,3}\s*)?(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|\*\*)",
+        first,
+        re.I,
+    ):
+        greeting = first
+
+    imported = import_prose_plan_json(
+        plan_text,
+        week_start=week_start,
+        personalised=True,
+        greeting=greeting,
+    )
+    if imported is None:
+        return record
+
+    finalized, _err = finalize_imported_plan_json(
+        imported,
+        include_lifting=True,
+        squad_plan_json=None,
+    )
+    if finalized is None:
+        return record
+
+    updated = dict(record)
+    updated["plan_json"] = finalized
+    if persist:
+        week_id = str(record.get("week_id") or "").strip()
+        if week_id:
+            path = athlete_weekly_plan_path(cache_dir, athlete_id, week_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(updated, indent=2))
+    return updated
 
 
 def plan_record_session_for_date(

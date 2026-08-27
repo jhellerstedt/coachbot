@@ -36,9 +36,16 @@ _ATHLETE_SESSION_TYPE_RE = re.compile(
 )
 _ATHLETE_ROWING_LINE_RE = re.compile(
     r"^(Warm-up|Main Set|Cool-down|Rest):\s*(.+?)\s*@\s*(Z\d)/(T\d),?\s*"
-    r"split\s*([^,]+),\s*HR\s*(\d+)\s*[–-]\s*(\d+)\s*bpm,?\s*priority:\s*(\w+)",
+    r"split\s*([^,]+),\s*HR\s*(\d+)\s*[–-]\s*(\d+)\s*bpm"
+    r"(?:,?\s*priority:\s*(\w+))?",
     re.I,
 )
+_ATHLETE_DAY_MD3_RE = re.compile(
+    r"^#{1,3}\s*(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+    r"(?:\s*,\s*\d{4}-\d{2}-\d{2})?\s*$",
+    re.I,
+)
+_MAIN_SET_HEADER_RE = re.compile(r"^\*\*Main Set:\*\*\s*(.+)$", re.I | re.M)
 _GYM_GOAL_RE = re.compile(r"\*Goal:\s*(\w+)\*", re.I)
 _DAY_HEADER_MD_RE = re.compile(
     r"\*?\*?(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
@@ -247,9 +254,31 @@ def _parse_athlete_rowing_line(line: str) -> Optional[Dict[str, Any]]:
         "zone_t": zone_t.upper(),
         "hr_bpm_min": int(hr_min),
         "hr_bpm_max": int(hr_max),
-        "priority": _normalize_priority(priority),
+        "priority": _normalize_priority(priority or "hr"),
         "notes": None,
     }
+
+
+def _main_set_header_spec(body: str) -> Optional[str]:
+    m = _MAIN_SET_HEADER_RE.search(body)
+    if not m:
+        return None
+    spec = m.group(1).strip()
+    if "/" in spec and "rest" in spec.lower():
+        return spec
+    return None
+
+
+def _apply_main_set_header_rest(
+    segment: Dict[str, Any], main_set_header: Optional[str]
+) -> None:
+    if not main_set_header or segment.get("phase") != "main_set":
+        return
+    duration = str(segment.get("duration") or "").strip()
+    if "/" in duration and "rest" in duration.lower():
+        return
+    segment["duration"] = main_set_header
+    segment["label"] = f"Main Set: {main_set_header}"
 
 
 def _split_day_blocks(text: str) -> List[Tuple[str, str]]:
@@ -260,13 +289,18 @@ def _split_day_blocks(text: str) -> List[Tuple[str, str]]:
     for line in lines:
         stripped = line.strip()
         athlete_day = _ATHLETE_DAY_HEADER_RE.match(stripped)
-        md = _DAY_HEADER_MD_RE.match(stripped) if not athlete_day else None
-        render = _DAY_HEADER_RENDER_RE.match(stripped) if not md and not athlete_day else None
-        if athlete_day or md or render:
+        md3 = _ATHLETE_DAY_MD3_RE.match(stripped) if not athlete_day else None
+        md = _DAY_HEADER_MD_RE.match(stripped) if not athlete_day and not md3 else None
+        render = (
+            _DAY_HEADER_RENDER_RE.match(stripped)
+            if not md and not md3 and not athlete_day
+            else None
+        )
+        if athlete_day or md3 or md or render:
             if current_day:
                 blocks.append((current_day, "\n".join(current_lines)))
-            if athlete_day:
-                current_day = athlete_day.group(1).title()
+            if athlete_day or md3:
+                current_day = (athlete_day or md3).group(1).title()  # type: ignore[union-attr]
                 current_lines = []
             else:
                 current_day = (md or render).group(1).title()  # type: ignore[union-attr]
@@ -359,6 +393,7 @@ def import_weekly_plan_json_from_text(
         elif session_type in ("erg", "on_water"):
             segments: List[Dict[str, Any]] = []
             erg_alt_segments: List[Dict[str, Any]] = []
+            main_set_header = _main_set_header_spec(body)
             in_alt = False
             for line in body.splitlines():
                 stripped = line.strip()
@@ -369,6 +404,8 @@ def import_weekly_plan_json_from_text(
                     continue
                 athlete_seg = _parse_athlete_rowing_line(stripped)
                 if athlete_seg:
+                    if not in_alt:
+                        _apply_main_set_header_rest(athlete_seg, main_set_header)
                     (erg_alt_segments if in_alt else segments).append(athlete_seg)
                     continue
                 render_seg = _parse_render_segment(stripped)
