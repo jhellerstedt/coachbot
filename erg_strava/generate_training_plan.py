@@ -4326,6 +4326,27 @@ def _weekday_name_in_text(text: str) -> Optional[str]:
     return None
 
 
+_MAKEUP_PRESCRIPTION_RE = re.compile(
+    r"\b(made?\s*up|make\s*up|makeup|missed|catch\s*up|backfill|substitut\w*)\b",
+    re.I,
+)
+
+
+def infer_makeup_prescribed_date(text: str, logged_on: date) -> Optional[date]:
+    """When the athlete did another plan day's workout (e.g. Tuesday erg on Thursday).
+
+    Returns the prescribed plan date to compare against. ``logged_on`` stays the
+    session date; only the prescription target moves.
+    """
+    body = (text or "").strip()
+    if not body or not _MAKEUP_PRESCRIPTION_RE.search(body):
+        return None
+    weekday = _weekday_name_in_text(body)
+    if weekday is None:
+        return None
+    return _plan_date_for_weekday(logged_on, weekday)
+
+
 def _plan_date_for_weekday(session_date: date, weekday_name: str) -> date:
     week = week_for_date(session_date)
     idx = _WEEKDAY_NAMES.index(weekday_name)
@@ -4348,6 +4369,10 @@ def build_erg_score_coaching_prompt(
     local_datetime = _resolve_coach_local_datetime(local_datetime=local_datetime)
     session_date = _parse_erg_score_session_date(erg_record) or local_datetime.date()
     weekday = _WEEKDAY_NAMES[session_date.weekday()]
+    prescribed_date = infer_makeup_prescribed_date(
+        athlete_message or "", session_date
+    ) or session_date
+    prescribed_weekday = _WEEKDAY_NAMES[prescribed_date.weekday()]
     exclude_id = str(erg_record.get("id") or "")
     history = load_erg_scores_for_athlete(
         cache_dir, athlete_id, exclude_id=exclude_id or None, limit=12
@@ -4374,7 +4399,10 @@ def build_erg_score_coaching_prompt(
 
     blocks: List[str] = []
     prescription_check = format_erg_session_comparison(
-        cache_dir, athlete_id, erg_record, session_date
+        cache_dir, athlete_id, erg_record, session_date,
+        prescribed_session_date=(
+            prescribed_date if prescribed_date != session_date else None
+        ),
     )
     if prescription_check:
         blocks.append(
@@ -4500,10 +4528,15 @@ def build_erg_score_coaching_prompt(
         *blocks,
     ]
     if brief:
+        prescription_phrase = (
+            f"the {prescribed_weekday} prescription (makeup session logged {weekday})"
+            if prescribed_date != session_date
+            else "today's prescription"
+        )
         system = (
             "You are an expert rowing coach. The athlete just logged an erg session.\n\n"
             "Write a **very short** reply — at most **2 sentences** total:\n"
-            "1. One sentence: what they did (key metrics) vs today's prescription "
+            f"1. One sentence: what they did (key metrics) vs {prescription_phrase} "
             "(matched / over / under / substituted).\n"
             "2. One sentence: the single most important takeaway, including week zone "
             "volume progress when provided.\n\n"

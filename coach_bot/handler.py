@@ -38,6 +38,7 @@ from generate_training_plan import (
     week_for_date,
     _parse_erg_score_session_date,
     find_erg_score_by_zulip_message,
+    infer_makeup_prescribed_date,
 )
 from erg_prescription_compare import (
     format_erg_session_comparison,
@@ -591,8 +592,12 @@ class CoachMessageHandler:
         if not images:
             detail = download_errors[0] if download_errors else "Could not download image."
             return f"Could not read erg score from screenshot: {detail}"
+        logged_date = ref.date()
+        prescribed_date = (
+            infer_makeup_prescribed_date(session_body, logged_date) or logged_date
+        )
         prescribed_session_text = prescribed_erg_section_for_log(
-            self.cache_dir, athlete.id, ref.date()
+            self.cache_dir, athlete.id, prescribed_date
         ) or ""
         try:
             if zulip_message_id is not None:
@@ -611,7 +616,7 @@ class CoachMessageHandler:
                     zulip_message_id=zulip_message_id,
                     zulip_sender_email=str(message.get("sender_email") or ""),
                     recorded_at=ref,
-                    session_hint_date=ref.date(),
+                    session_hint_date=logged_date,
                     athlete_message=session_body,
                     prescribed_session_text=prescribed_session_text,
                 )
@@ -783,6 +788,9 @@ class CoachMessageHandler:
     ) -> str:
         self._react_thumbs_up(message)
         session_date = _parse_erg_score_session_date(record) or ref.date()
+        prescribed_date = (
+            infer_makeup_prescribed_date(body, session_date) or session_date
+        )
         plan_record = plan_for_date(self.cache_dir, session_date)
         try:
             coaching = answer_erg_score_coaching(
@@ -801,7 +809,13 @@ class CoachMessageHandler:
             coaching = f"Logged your score, but coaching feedback failed: {exc}"
 
         prescription_block = format_erg_session_comparison(
-            self.cache_dir, athlete.id, record, session_date
+            self.cache_dir,
+            athlete.id,
+            record,
+            session_date,
+            prescribed_session_date=(
+                prescribed_date if prescribed_date != session_date else None
+            ),
         )
         zone_block = format_week_zone_volume_progress(
             self.cache_dir,
