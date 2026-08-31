@@ -106,6 +106,15 @@ def test_rotation_replaces_exercise_after_configured_weeks():
     assert rotation.with_name in after_names
 
 
+def test_next_gym_week_index_from_plans_skips_missing_meta():
+    from gym_program import next_gym_week_index_from_plans
+
+    assert next_gym_week_index_from_plans([{"plan_json": None}]) == 0
+    assert next_gym_week_index_from_plans(
+        [{"plan_json": None}, {"plan_json": {"gym_program": {"week_index": 0}}}]
+    ) == 1
+
+
 def test_median_latest_peak_kg_per_athlete():
     metrics = {
         1: {

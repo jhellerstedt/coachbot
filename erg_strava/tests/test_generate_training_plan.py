@@ -191,6 +191,94 @@ def test_lifting_clause_does_not_ask_llm_to_rotate():
     assert "gym program" in text.lower()
 
 
+def test_squad_plan_recovers_json_when_llm_returns_prose_only(monkeypatch):
+    from datetime import date
+
+    from generate_training_plan import (
+        GeneratedWeeklyPlan,
+        generate_squad_weekly_plan,
+        week_bounds_from_monday,
+    )
+
+    monkeypatch.setattr(
+        "generate_training_plan._generate_structured_plan_with_fallback",
+        lambda *a, **k: GeneratedWeeklyPlan(
+            plan_text="Sunday: rowing", plan_json=None
+        ),
+    )
+    out = generate_squad_weekly_plan(
+        "summary",
+        "tok",
+        plan_week=week_bounds_from_monday(date(2026, 8, 31)),
+        phase="build",
+        prev_plan_json={"gym_program": {"id": "build-a", "week_index": 0}},
+    )
+    assert out.plan_json is not None
+    assert parse_weekly_plan(out.plan_json) is not None
+    assert "Sunday: rowing" not in out.plan_text
+
+
+def test_send_weekly_athlete_plan_dms_sends_recovered_squad_json(
+    monkeypatch, tmp_path
+):
+    from datetime import date
+
+    from generate_training_plan import (
+        GeneratedWeeklyPlan,
+        PipelineAthleteCfg,
+        generate_squad_weekly_plan,
+        send_weekly_athlete_plan_dms,
+        week_bounds_from_monday,
+    )
+
+    monkeypatch.setattr(
+        "generate_training_plan._generate_structured_plan_with_fallback",
+        lambda *a, **k: GeneratedWeeklyPlan(
+            plan_text="Sunday: rowing", plan_json=None
+        ),
+    )
+    week = week_bounds_from_monday(date(2026, 8, 31))
+    recovered = generate_squad_weekly_plan(
+        "summary", "tok", plan_week=week, phase="build"
+    )
+    monkeypatch.setattr(
+        "generate_training_plan.generate_athlete_weekly_plan",
+        lambda *a, **k: recovered,
+    )
+    monkeypatch.setattr(
+        "erg_session_merge.athlete_has_week_training_log",
+        lambda *a, **k: True,
+    )
+    monkeypatch.setattr(
+        "erg_session_merge.format_athlete_week_training_log",
+        lambda *a, **k: "log",
+    )
+    monkeypatch.setattr(
+        "erg_prescription_compare.format_last_week_volume_for_dm",
+        lambda *a, **k: "",
+    )
+    sent: list[str] = []
+    monkeypatch.setattr(
+        "send_to_zulip.send_private_message_to_zulip",
+        lambda content, to, **kwargs: sent.append(content) or {"result": "success"},
+    )
+
+    count = send_weekly_athlete_plan_dms(
+        tmp_path,
+        [PipelineAthleteCfg(id=1, label="Jack H", zulip_user_id=73)],
+        recovered.plan_text,
+        week,
+        week,
+        {},
+        {},
+        "tok",
+        squad_plan_json=recovered.plan_json,
+    )
+
+    assert count == 1
+    assert sent
+
+
 def test_generate_athlete_plan_locks_when_llm_returns_prose_only(monkeypatch):
     from datetime import date
 

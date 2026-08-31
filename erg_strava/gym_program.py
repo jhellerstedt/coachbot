@@ -505,6 +505,22 @@ def next_gym_week_index(prev_plan_json: Optional[Mapping[str, Any]]) -> int:
         return 0
 
 
+def next_gym_week_index_from_plans(records: Sequence[Mapping[str, Any]]) -> int:
+    """Return the week after the newest record carrying gym program metadata."""
+    for record in records:
+        plan_json = record.get("plan_json")
+        if not isinstance(plan_json, Mapping):
+            continue
+        meta = plan_json.get("gym_program")
+        if not isinstance(meta, Mapping) or "week_index" not in meta:
+            continue
+        try:
+            return int(meta["week_index"]) + 1
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
 def _parse_start(raw: Any) -> datetime:
     text = str(raw or "").strip()
     if not text:
