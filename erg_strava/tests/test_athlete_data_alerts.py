@@ -110,6 +110,21 @@ def test_merge_mixed_source():
     assert "Screenshot issue" in body
 
 
+def test_send_athlete_data_alerts_omits_suunto_when_cfg_not_passed():
+    jack = SimpleNamespace(
+        id=JACK, zulip_user_id=73, zulip_email=None, token_dir=None
+    )
+    alerts = [AthleteDataAlert(JACK, "Jack H", "suunto", "sync failed")]
+    sent: list[tuple[str, list[int | str]]] = []
+
+    def send_fn(content: str, recipients: list[int | str]) -> None:
+        sent.append((content, recipients))
+
+    count = send_athlete_data_alerts(alerts, [jack], send_fn=send_fn)
+    assert count == 0
+    assert sent == []
+
+
 def test_send_athlete_data_alerts_filters_by_mapping():
     jack = SimpleNamespace(
         id=JACK, zulip_user_id=73, zulip_email=None, token_dir=None

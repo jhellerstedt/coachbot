@@ -29,13 +29,13 @@ _TITLE_BY_SOURCE = {
 
 def _default_suunto_cfg() -> SuuntoCfg:
     return SuuntoCfg(
-        enabled=True,
+        enabled=False,
         primary=True,
         suuntool_path=None,
         session_file=None,
         indoor_rowing_activity_ids=frozenset({57}),
         gym_activity_ids=frozenset({23}),
-        athlete_ids=None,
+        athlete_ids=frozenset(),
     )
 
 
