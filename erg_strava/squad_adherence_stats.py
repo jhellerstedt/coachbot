@@ -17,6 +17,7 @@ from generate_training_plan import (
     _parse_activity_start,
     is_gym_activity,
     iter_cached_athlete_ids,
+    load_erg_scores_for_week,
     load_gym_logs_for_athlete,
     week_contains,
 )
@@ -127,12 +128,12 @@ def _erg_week_mask(erg_df: pd.DataFrame, week: WeekBounds) -> pd.Series:
     return starts.map(_in_week).fillna(False)
 
 
-def _bucket_erg_points(
+def _erg_point_buckets(
     sub: pd.DataFrame,
     profile: Optional[AthleteProfile],
-) -> Tuple[Optional[float], float, Optional[float], float]:
+) -> Tuple[List[float], float, List[float], float]:
     if sub.empty or "split_500" not in sub.columns or "hr" not in sub.columns:
-        return None, 0.0, None, 0.0
+        return [], 0.0, [], 0.0
 
     z13_splits: List[float] = []
     z13_secs = 0.0
@@ -154,9 +155,101 @@ def _bucket_erg_points(
                 z4p_splits.append(float(split))
                 z4p_secs += float(dt)
 
+    return z13_splits, z13_secs / 60.0, z4p_splits, z4p_secs / 60.0
+
+
+def _bucket_erg_points(
+    sub: pd.DataFrame,
+    profile: Optional[AthleteProfile],
+) -> Tuple[Optional[float], float, Optional[float], float]:
+    z13_splits, z13_min, z4p_splits, z4p_min = _erg_point_buckets(sub, profile)
     z13_med = float(np.median(z13_splits)) if z13_splits else None
     z4p_med = float(np.median(z4p_splits)) if z4p_splits else None
-    return z13_med, z13_secs / 60.0, z4p_med, z4p_secs / 60.0
+    return z13_med, z13_min, z4p_med, z4p_min
+
+
+def _bucket_erg_from_scores(
+    records: Sequence[Mapping[str, Any]],
+    profile: Optional[AthleteProfile],
+) -> Tuple[List[float], float, List[float], float]:
+    z13_splits: List[float] = []
+    z13_secs = 0.0
+    z4p_splits: List[float] = []
+    z4p_secs = 0.0
+
+    for record in records:
+        metrics = record.get("metrics") or {}
+        parts = metrics.get("session_parts")
+        samples = parts if isinstance(parts, list) else [metrics]
+        for sample in samples:
+            if not isinstance(sample, Mapping):
+                continue
+            try:
+                duration_sec = float(sample.get("duration_sec") or 0.0)
+                avg_hr = float(sample.get("avg_hr"))
+            except (TypeError, ValueError):
+                continue
+            if (
+                not np.isfinite(duration_sec)
+                or duration_sec <= 0
+                or not np.isfinite(avg_hr)
+            ):
+                continue
+            split_raw = sample.get(
+                "avg_split_500_sec",
+                metrics.get("avg_split_500_sec"),
+            )
+            try:
+                split = float(split_raw)
+            except (TypeError, ValueError):
+                split = float("nan")
+            zone = _classify_hr_zone(avg_hr, profile)
+            if zone in _AEROBIC_ZONES:
+                z13_secs += duration_sec
+                if np.isfinite(split):
+                    z13_splits.append(split)
+            elif zone in _HIGH_ZONES:
+                z4p_secs += duration_sec
+                if np.isfinite(split):
+                    z4p_splits.append(split)
+
+    return z13_splits, z13_secs / 60.0, z4p_splits, z4p_secs / 60.0
+
+
+def _scores_without_merged_streams(
+    records: Sequence[Mapping[str, Any]],
+    athlete_erg: pd.DataFrame,
+) -> List[Mapping[str, Any]]:
+    if athlete_erg.empty:
+        return list(records)
+    suunto_keys: set[str] = set()
+    activity_ids: set[int] = set()
+    if "suunto_key" in athlete_erg.columns:
+        suunto_keys = {
+            str(value)
+            for value in athlete_erg["suunto_key"].dropna().unique()
+            if str(value)
+        }
+    if "activity_id" in athlete_erg.columns:
+        for value in athlete_erg["activity_id"].dropna().unique():
+            try:
+                activity_ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+
+    out: List[Mapping[str, Any]] = []
+    for record in records:
+        merged_suunto = str(record.get("merged_suunto_workout_key") or "")
+        try:
+            merged_strava = int(record.get("merged_strava_activity_id"))
+        except (TypeError, ValueError):
+            merged_strava = None
+        if merged_suunto and merged_suunto in suunto_keys:
+            continue
+        if merged_strava is not None and merged_strava in activity_ids:
+            continue
+        out.append(record)
+    return out
 
 
 def _athlete_week_gym_tonnage(
@@ -271,7 +364,23 @@ def compute_squad_week_adherence_stats(
         if not erg_week.empty and "athlete" in erg_week.columns:
             athlete_erg = erg_week.loc[erg_week["athlete"] == label]
         profile = profiles.get(athlete_id)
-        z13_split, z13_min, z4p_split, z4p_min = _bucket_erg_points(athlete_erg, profile)
+        z13_splits, z13_min, z4p_splits, z4p_min = _erg_point_buckets(
+            athlete_erg, profile
+        )
+        score_records = _scores_without_merged_streams(
+            load_erg_scores_for_week(cache_dir, athlete_id, week),
+            athlete_erg,
+        )
+        score_buckets = _bucket_erg_from_scores(
+            score_records,
+            profile,
+        )
+        z13_splits.extend(score_buckets[0])
+        z13_min += score_buckets[1]
+        z4p_splits.extend(score_buckets[2])
+        z4p_min += score_buckets[3]
+        z13_split = float(np.median(z13_splits)) if z13_splits else None
+        z4p_split = float(np.median(z4p_splits)) if z4p_splits else None
         per_athlete.append(
             AthleteWeekAdherenceStats(
                 athlete_id=athlete_id,

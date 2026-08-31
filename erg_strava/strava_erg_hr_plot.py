@@ -85,6 +85,7 @@ from generate_training_plan import (
     week_bounds_from_monday,
     build_training_summary,
     is_gym_activity,
+    load_erg_scores_for_athlete,
     load_pipeline_athletes,
     plan_week_bounds,
     format_public_weekly_plan_post,
@@ -2016,9 +2017,36 @@ def format_new_erg_data_summary(
     prev_keys = {str(k) for k in last_run.get("suunto_keys") or []}
     current_keys = {str(k) for k in df["suunto_key"].dropna().unique() if str(k)}
     new_keys = current_keys - prev_keys
-    last_date = activity_local_date(run_at).isoformat()
-    if not new_keys:
+    last_day = activity_local_date(run_at)
+    last_date = last_day.isoformat()
+    screenshot_lines: List[str] = []
+    for athlete in athletes:
+        for score in load_erg_scores_for_athlete(
+            cache_dir, athlete.id, limit=sys.maxsize
+        ):
+            session_date = str(score.get("session_date") or "")
+            try:
+                session_day = date.fromisoformat(session_date)
+            except ValueError:
+                continue
+            if "screenshot" not in str(score.get("source") or "").lower():
+                continue
+            if session_day <= last_day:
+                continue
+            metrics = score.get("metrics") or {}
+            distance = metrics.get("distance_m")
+            try:
+                metres = f"{float(distance):g}"
+            except (TypeError, ValueError):
+                metres = "?"
+            screenshot_lines.append(
+                f"screenshot {score.get('id') or '?'}, "
+                f"{metres} m, {session_date}"
+            )
+    if not new_keys and not screenshot_lines:
         return f"new data since {last_date}:\n(none)"
+    if not new_keys:
+        return "\n".join([f"new data since {last_date}:", *screenshot_lines])
 
     lookup = _plotted_suunto_lookup(df, athletes, cache_dir, suunto_cfg)
     grouped = (
@@ -2027,7 +2055,7 @@ def format_new_erg_data_summary(
         .sort_values("activity_start", ascending=False)
     )
 
-    lines = [f"new data since {last_date}:"]
+    lines = [f"new data since {last_date}:", *screenshot_lines]
     for key in grouped.index:
         key_str = str(key)
         if key_str not in new_keys:
