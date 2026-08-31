@@ -1287,8 +1287,10 @@ def build_coach_interpret_prompt(
         '  "reply": "Concise Zulip reply to the athlete. For plan_adjustment, confirm '
         "what you understood and that it will be applied at the next weekly plan "
         'generation. For list_adjustments, list each queued item from the pending '
-        'block in context. For gym_session_log, briefly confirm what was logged '
-        '(exercises/tonnage if obvious). For profile_update, confirm the saved '
+        'block in context. For gym_session_log, one short sentence confirming the '
+        "session was logged. Do not include log ids, tonnage tables, athlete "
+        "headings, prescription checks, or an RPE question — those are appended "
+        'separately. For profile_update, confirm the saved '
         'values.",\n'
         f"{gym_log_json}"
         f"{profile_update_json}"
@@ -1328,7 +1330,9 @@ def build_coach_interpret_prompt(
         "emphasize 'intent'—explosive concentric speed and load quality rather than "
         "just volume—and reference the recent gym tonnage history (when provided) for "
         "progressive overload.\n"
-        "- Be concise in reply."
+        "- Be concise in reply.\n"
+        "- For gym_session_log, never ask how the last set felt and never invent a "
+        "log id or tonnage table."
     )
     return system, "\n\n".join(user_blocks), history
 
@@ -3310,6 +3314,18 @@ def find_gym_log_by_zulip_message(
         if int(rec.get("zulip_message_id") or 0) == zulip_message_id:
             return rec
     return None
+
+
+def list_gym_logs_sharing_zulip_message(
+    cache_dir: Path, zulip_message_id: int
+) -> List[Tuple[int, Dict[str, Any]]]:
+    """Return every athlete copy logged from the same Zulip message."""
+    out: List[Tuple[int, Dict[str, Any]]] = []
+    for athlete_id in iter_cached_athlete_ids(cache_dir):
+        rec = find_gym_log_by_zulip_message(cache_dir, athlete_id, zulip_message_id)
+        if rec is not None:
+            out.append((athlete_id, rec))
+    return out
 
 
 def find_gym_log_by_id(

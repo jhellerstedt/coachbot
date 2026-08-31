@@ -23,6 +23,7 @@ from gym_program import (
     overlay_session_rpe_on_record,
     overlay_exercise_rpe_on_record,
     overlay_transcript_rpe_on_record,
+    sanitize_gym_session_llm_reply,
     personalize_plan_gym_loads,
     apply_rpe_to_last_working_set,
     progression_decision,
@@ -378,6 +379,38 @@ def test_overlay_exercise_rpe_from_athlete_message():
     assert exercises["Bulgarian split squat"][-1]["rpe"] == 4.0
     assert exercises["Plank"][-1]["rpe"] == 5.0
     assert gym_log_missing_rpe(record) is False
+
+
+def test_overlay_exercise_rpe_from_flattened_single_line():
+    record = _leg_day_record_without_rpe()
+    flattened = (
+        "gym this morning with 1. Back squat 10r 20, 6r 80, 8r 70, 10r 60 "
+        "RPE 5 2. Romanian deadlift 10r 20, 6r 70, 8r 60, 10r 50 RPE 4 "
+        "3. Bulgarian split squat 5r 20, 6r 40, 8r 30, 10r 25 RPE 4 "
+        "4. Plank 60s, 60s, 60s RPE 5"
+    )
+    assert overlay_exercise_rpe_on_record(record, flattened) is True
+    exercises = {ex["name"]: ex["sets"] for ex in record["gym"]["exercises"]}
+    assert exercises["Back squat"][-1]["rpe"] == 5.0
+    assert exercises["Romanian deadlift"][-1]["rpe"] == 4.0
+    assert exercises["Bulgarian split squat"][-1]["rpe"] == 4.0
+    assert exercises["Plank"][-1]["rpe"] == 5.0
+    assert gym_log_missing_rpe(record) is False
+
+
+def test_sanitize_gym_session_llm_reply_strips_fake_log_and_rpe_ask():
+    rpe_ask = format_rpe_follow_up()
+    noisy = (
+        "Nice work on the gym session! You logged back squats. **Jack H** "
+        "**Logged gym session** (`bf4c187c-89e3-4d83-85d4-8c65c52eb5a2`, "
+        "2026-08-31) — 2795 kg total tonnage, 4 exercise(s). - Back squat: "
+        f"max 80.0 kg, 2790 kg tonnage {rpe_ask}"
+    )
+    cleaned = sanitize_gym_session_llm_reply(noisy)
+    assert "How hard" not in cleaned
+    assert "bf4c187c" not in cleaned
+    assert "Logged gym session" not in cleaned
+    assert "Nice work" in cleaned
 
 
 def test_overlay_exercise_rpe_does_not_overwrite_existing():

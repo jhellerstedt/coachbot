@@ -890,10 +890,7 @@ def apply_rpe_to_last_working_set(record: Dict[str, Any], rpe: float) -> bool:
 def extract_session_rpe_from_transcript(text: str) -> Optional[float]:
     """Last session-level RPE line (``RPE 4`` / ``easy``). Bare numbers are ignored."""
     last: Optional[float] = None
-    for raw in (text or "").splitlines():
-        line = " ".join(raw.strip().split())
-        if not line:
-            continue
+    for line in _rpe_overlay_lines(text):
         lower = line.lower().rstrip(".!")
         if not (lower.startswith("rpe") or lower in _RPE_WORD_VALUES):
             continue
@@ -909,6 +906,44 @@ def overlay_session_rpe_on_record(record: Dict[str, Any], transcript: str) -> bo
     if rpe is None or not gym_log_missing_rpe(record):
         return False
     return apply_rpe_to_last_working_set(record, rpe)
+
+
+_RPE_SPLIT_HEADER_RE = re.compile(r"(?=(?<!\d)\d+\.\s)")
+_RPE_SPLIT_RPE_RE = re.compile(r"(?=\bRPE\b)", re.I)
+_RPE_SPLIT_WORD_RE = re.compile(
+    r"(?=\b(?:easy|moderate|hard|max effort|maximum effort)\b)",
+    re.I,
+)
+
+
+def _rpe_overlay_lines(transcript: str) -> List[str]:
+    """Split a gym transcript into header/set/RPE lines, including flattened text."""
+    text = transcript or ""
+    text = _RPE_SPLIT_HEADER_RE.sub("\n", text)
+    text = _RPE_SPLIT_RPE_RE.sub("\n", text)
+    text = _RPE_SPLIT_WORD_RE.sub("\n", text)
+    lines: List[str] = []
+    for raw in text.splitlines():
+        line = " ".join(raw.strip().split())
+        if line:
+            lines.append(line)
+    return lines
+
+
+def sanitize_gym_session_llm_reply(reply: str) -> str:
+    """Drop invented log confirmations and RPE prompts from the intent LLM reply."""
+    text = reply or ""
+    rpe_note = format_rpe_follow_up()
+    text = text.replace(rpe_note, " ")
+    text = text.replace(rpe_note.replace("–", "-"), " ")
+    text = re.sub(
+        r"(?is)(?:\*\*Logged gym session\*\*|<strong>Logged gym session</strong>).*$",
+        "",
+        text,
+        count=1,
+    )
+    text = re.sub(r"(?:\s*\*\*[^*]+\*\*\s*)+\Z", "", text.strip())
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
 def _canonical_gym_exercise_name(name: str) -> str:
@@ -995,10 +1030,7 @@ def overlay_exercise_rpe_on_record(record: Dict[str, Any], transcript: str) -> b
     """Apply per-exercise ``RPE N`` lines to each exercise's last working set."""
     current_name: Optional[str] = None
     updated = False
-    for raw in (transcript or "").splitlines():
-        line = " ".join(raw.strip().split())
-        if not line:
-            continue
+    for line in _rpe_overlay_lines(transcript):
         matched = _recorded_exercise_for_header(record, line)
         if matched is not None:
             current_name = str(matched.get("name") or "") or current_name
