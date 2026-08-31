@@ -911,6 +911,117 @@ def overlay_session_rpe_on_record(record: Dict[str, Any], transcript: str) -> bo
     return apply_rpe_to_last_working_set(record, rpe)
 
 
+def _canonical_gym_exercise_name(name: str) -> str:
+    try:
+        from generate_training_plan import normalize_gym_exercise_header
+    except ImportError:
+        normalize_gym_exercise_header = None  # type: ignore[assignment]
+    text = (name or "").strip()
+    if normalize_gym_exercise_header is not None:
+        canonical = normalize_gym_exercise_header(text)
+        if canonical:
+            return canonical.lower()
+    stripped = re.sub(r"^\d+\.\s*", "", text)
+    stripped = re.sub(r"^\*+|\*+$", "", stripped).strip().rstrip(":")
+    return stripped.lower()
+
+
+def _recorded_exercise_for_header(
+    record: Mapping[str, Any], line: str
+) -> Optional[Mapping[str, Any]]:
+    gym = record.get("gym") if isinstance(record, Mapping) else None
+    if not isinstance(gym, Mapping):
+        return None
+    header_key = _canonical_gym_exercise_name(line)
+    stripped = re.sub(r"^\d+\.\s*", "", (line or "").strip())
+    stripped = re.sub(r"^\*+|\*+$", "", stripped).strip()
+    stripped_lower = stripped.lower()
+    for ex in gym.get("exercises") or []:
+        if not isinstance(ex, Mapping):
+            continue
+        name = str(ex.get("name") or "")
+        name_key = _canonical_gym_exercise_name(name)
+        if header_key and name_key and header_key == name_key:
+            return ex
+        lower_name = name.lower()
+        if stripped_lower == lower_name or stripped_lower.startswith(lower_name + ":"):
+            return ex
+    return None
+
+
+def _is_duration_set(raw: Mapping[str, Any]) -> bool:
+    try:
+        return float(raw.get("duration_sec") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def apply_rpe_to_exercise_last_working_set(
+    record: Dict[str, Any], exercise_name: str, rpe: float
+) -> bool:
+    """Set rpe on an exercise's last working set. Does not overwrite existing rpe."""
+    gym = record.get("gym")
+    if not isinstance(gym, Mapping):
+        return False
+    want = _canonical_gym_exercise_name(exercise_name)
+    target_ex: Optional[Mapping[str, Any]] = None
+    for ex in gym.get("exercises") or []:
+        if not isinstance(ex, Mapping):
+            continue
+        if _canonical_gym_exercise_name(str(ex.get("name") or "")) == want:
+            target_ex = ex
+            break
+    if target_ex is None:
+        return False
+    last_weighted: Optional[Dict[str, Any]] = None
+    last_duration: Optional[Dict[str, Any]] = None
+    last_set: Optional[Dict[str, Any]] = None
+    for s in target_ex.get("sets") or []:
+        if not isinstance(s, dict):
+            continue
+        last_set = s
+        if _is_weighted_working_set(s):
+            last_weighted = s
+        elif _is_duration_set(s):
+            last_duration = s
+    last = last_weighted or last_duration or last_set
+    if last is None or _set_rpe(last) is not None:
+        return False
+    last["rpe"] = float(rpe)
+    return True
+
+
+def overlay_exercise_rpe_on_record(record: Dict[str, Any], transcript: str) -> bool:
+    """Apply per-exercise ``RPE N`` lines to each exercise's last working set."""
+    current_name: Optional[str] = None
+    updated = False
+    for raw in (transcript or "").splitlines():
+        line = " ".join(raw.strip().split())
+        if not line:
+            continue
+        matched = _recorded_exercise_for_header(record, line)
+        if matched is not None:
+            current_name = str(matched.get("name") or "") or current_name
+            continue
+        lower = line.lower().rstrip(".!")
+        if not (lower.startswith("rpe") or lower in _RPE_WORD_VALUES):
+            continue
+        parsed = parse_rpe_follow_up_reply(line)
+        if parsed is None or not current_name:
+            continue
+        if apply_rpe_to_exercise_last_working_set(record, current_name, parsed):
+            updated = True
+    return updated
+
+
+def overlay_transcript_rpe_on_record(record: Dict[str, Any], transcript: str) -> bool:
+    """Per-exercise RPE first, then session-level last-set RPE if still missing."""
+    updated = overlay_exercise_rpe_on_record(record, transcript)
+    if overlay_session_rpe_on_record(record, transcript):
+        updated = True
+    return updated
+
+
 def format_rpe_recorded_confirmation(
     records: Sequence[Mapping[str, Any]], rpe: float
 ) -> str:
