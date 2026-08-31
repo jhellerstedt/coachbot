@@ -240,11 +240,23 @@ def _scores_without_merged_streams(
     out: List[Mapping[str, Any]] = []
     for record in records:
         merged_suunto = str(record.get("merged_suunto_workout_key") or "")
+        merged_suunto_values = record.get("merged_suunto_workout_keys")
+        merged_suunto_keys = {
+            str(value)
+            for value in (
+                merged_suunto_values
+                if isinstance(merged_suunto_values, list)
+                else []
+            )
+            if str(value)
+        }
         try:
             merged_strava = int(record.get("merged_strava_activity_id"))
         except (TypeError, ValueError):
             merged_strava = None
         if merged_suunto and merged_suunto in suunto_keys:
+            continue
+        if merged_suunto_keys & suunto_keys:
             continue
         if merged_strava is not None and merged_strava in activity_ids:
             continue

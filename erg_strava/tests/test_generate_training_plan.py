@@ -218,6 +218,103 @@ def test_squad_plan_recovers_json_when_llm_returns_prose_only(monkeypatch):
     assert "Sunday: rowing" not in out.plan_text
 
 
+def test_cached_plan_history_drives_squad_gym_rotation(monkeypatch, tmp_path):
+    from datetime import date
+
+    from generate_training_plan import (
+        GeneratedWeeklyPlan,
+        generate_squad_weekly_plan,
+        list_weekly_plan_records,
+        week_bounds_from_monday,
+    )
+    from gym_program import next_gym_week_index_from_plans
+
+    plans = tmp_path / "weekly_plans"
+    plans.mkdir()
+    (plans / "2026-08-17_2026-08-23.json").write_text(
+        json.dumps(
+            {
+                "week_id": "2026-08-17_2026-08-23",
+                "plan_json": {"gym_program": {"week_index": 0}},
+            }
+        )
+    )
+    (plans / "2026-08-24_2026-08-30.json").write_text(
+        json.dumps(
+            {
+                "week_id": "2026-08-24_2026-08-30",
+                "plan_json": None,
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "generate_training_plan._generate_structured_plan_with_fallback",
+        lambda *a, **k: GeneratedWeeklyPlan(plan_text="bad prose", plan_json=None),
+    )
+
+    records = list_weekly_plan_records(tmp_path)
+    gym_week_index = next_gym_week_index_from_plans(records)
+    out = generate_squad_weekly_plan(
+        "summary",
+        "tok",
+        plan_week=week_bounds_from_monday(date(2026, 8, 31)),
+        phase="build",
+        prev_plan_json=None,
+        gym_week_index=gym_week_index,
+    )
+
+    assert [record["week_id"] for record in records] == [
+        "2026-08-24_2026-08-30",
+        "2026-08-17_2026-08-23",
+    ]
+    assert gym_week_index == 1
+    monday = next(day for day in out.plan_json["days"] if day["weekday"] == "Monday")
+    names = [exercise["name"] for exercise in monday["gym"]["exercises"]]
+    assert "Kettlebell swings" in names
+    assert "Bulgarian split squat" not in names
+
+
+def test_pipeline_recovers_when_squad_generator_raises(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+
+    from generate_training_plan import run_weekly_training_pipeline
+
+    monkeypatch.setattr(
+        "generate_training_plan.get_kagi_gym_tonnage",
+        lambda *args, **kwargs: "",
+    )
+    monkeypatch.setattr(
+        "generate_training_plan.get_kagi_goal_tracking",
+        lambda *args, **kwargs: "",
+    )
+    monkeypatch.setattr(
+        "generate_training_plan.fetch_zulip_topic_feedback_since_last_session",
+        lambda *args, **kwargs: "",
+    )
+    monkeypatch.setattr(
+        "generate_training_plan.generate_squad_weekly_plan",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("structured generation failed")
+        ),
+    )
+
+    report, record = run_weekly_training_pipeline(
+        "summary",
+        "tok",
+        tmp_path,
+        [],
+        {},
+        frozenset(),
+        (),
+        now=datetime(2026, 8, 31, 8, tzinfo=timezone.utc),
+        send_athlete_plan_dms=False,
+    )
+
+    assert record.plan_json is not None
+    assert parse_weekly_plan(record.plan_json) is not None
+    assert "Squad weekly plan" in report
+
+
 def test_send_weekly_athlete_plan_dms_sends_recovered_squad_json(
     monkeypatch, tmp_path
 ):

@@ -1210,6 +1210,27 @@ def collect_suunto_alerts(
     return alerts
 
 
+def send_athlete_data_alerts_safely(
+    alerts: List[AthleteDataAlert],
+    athletes: List[object],
+    *,
+    send_fn: Callable[..., object],
+    send_alerts_fn: Callable[..., int] = send_athlete_data_alerts,
+    **kwargs: Any,
+) -> int:
+    """Send courtesy data alerts without allowing a DM failure to stop the cron."""
+    try:
+        return send_alerts_fn(
+            alerts,
+            athletes,
+            send_fn=send_fn,
+            **kwargs,
+        )
+    except Exception as exc:
+        print(f"Athlete data alert DM failed: {exc}", file=sys.stderr)
+        return 0
+
+
 def _activity_cache_has_hr(
     paths: Dict[str, Path],
     aid: int,
@@ -2267,7 +2288,7 @@ def main() -> None:
                     str(_ERG_DIR.parent / "rrcc-zuliprc"),
                 )
             )
-            send_athlete_data_alerts(
+            send_athlete_data_alerts_safely(
                 alerts,
                 pipeline_athletes,
                 send_fn=lambda content, to, **k: send_private_message_to_zulip(
@@ -2392,12 +2413,13 @@ def main() -> None:
         )
         print("\n=== Weekly training report ===\n")
         print(report)
-        print(
-            f"\nCached plan: {record.week_id} "
-            f"({weekly_plans_dir(cache_dir) / (record.week_id + '.json')})",
-            flush=True,
-        )
-        if not args.no_zulip:
+        if record.plan_json is not None:
+            print(
+                f"\nCached plan: {record.week_id} "
+                f"({weekly_plans_dir(cache_dir) / (record.week_id + '.json')})",
+                flush=True,
+            )
+        if not args.no_zulip and record.plan_json is not None:
             post_plan_to_zulip(
                 format_public_weekly_plan_post(record),
                 ZULIP_STREAM,

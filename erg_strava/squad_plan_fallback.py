@@ -25,6 +25,7 @@ def build_library_squad_plan_json(
     peak_kg_by_exercise: Mapping[str, float],
     prev_plan_json: Optional[Mapping[str, Any]],
     session_selections: Optional[Mapping[str, ErgSessionTemplate]] = None,
+    week_index: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build a valid squad plan without an LLM response."""
     weekdays = (
@@ -91,7 +92,11 @@ def build_library_squad_plan_json(
         patched = apply_program_gym_to_plan(
             patched,
             phase=phase,
-            week_index=next_gym_week_index(prev_plan_json),
+            week_index=(
+                next_gym_week_index(prev_plan_json)
+                if week_index is None
+                else week_index
+            ),
             peak_kg_by_exercise=peak_kg_by_exercise,
             prev_plan_json=prev_plan_json,
         )

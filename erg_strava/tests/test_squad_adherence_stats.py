@@ -143,6 +143,55 @@ def test_screenshot_score_is_not_double_counted_with_merged_stream(tmp_path):
     assert stats.athlete_stats[0].z13_minutes < 1
 
 
+def test_screenshot_score_plural_suunto_keys_are_not_double_counted(tmp_path):
+    week = week_bounds_from_monday(datetime(2026, 8, 24).date())
+    scores = tmp_path / "athlete_1" / "erg_scores"
+    scores.mkdir(parents=True)
+    (scores / "s.json").write_text(
+        json.dumps(
+            {
+                "id": "s",
+                "session_date": "2026-08-27",
+                "merged_suunto_workout_keys": ["k1", "k2"],
+                "metrics": {
+                    "duration_sec": 2160,
+                    "avg_hr": 141,
+                    "avg_split_500_sec": 133.0,
+                },
+            }
+        )
+    )
+    erg_df = pd.DataFrame(
+        {
+            "activity_id": [99, 99],
+            "suunto_key": ["k1", "k1"],
+            "activity_start": [
+                "2026-08-27T08:00:00Z",
+                "2026-08-27T08:00:10Z",
+            ],
+            "athlete": ["Jack H", "Jack H"],
+            "time": [0.0, 10.0],
+            "hr": [141.0, 141.0],
+            "split_500": [133.0, 133.0],
+        }
+    )
+
+    stats = compute_squad_week_adherence_stats(
+        week,
+        [],
+        {},
+        erg_df,
+        cache_dir=tmp_path,
+        athlete_profiles={
+            1: AthleteProfile(id=1, label="Jack H", max_hr_bpm=185)
+        },
+        gym_types=frozenset(),
+        gym_name_patterns=(),
+    )
+
+    assert stats.athlete_stats[0].z13_minutes < 1
+
+
 def test_screenshot_session_parts_are_zoned_individually():
     profile = AthleteProfile(id=1, label="Jack H", max_hr_bpm=185)
     records = [

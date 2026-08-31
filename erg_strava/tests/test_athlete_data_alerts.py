@@ -14,7 +14,10 @@ from athlete_data_alerts import (
     source_mapped_for_athlete,
 )
 from generate_training_plan import week_bounds_from_monday
-from strava_erg_hr_plot import collect_suunto_alerts
+from strava_erg_hr_plot import (
+    collect_suunto_alerts,
+    send_athlete_data_alerts_safely,
+)
 from suunto_client import SuuntoCfg
 
 JACK = 53603359
@@ -156,6 +159,21 @@ def test_send_athlete_data_alerts_filters_by_mapping():
     assert count == 1
     assert len(sent) == 1
     assert sent[0][1] == [73]
+
+
+def test_send_athlete_data_alerts_safely_logs_and_continues(capsys):
+    def fail_send(*args, **kwargs):
+        raise RuntimeError("zulip unavailable")
+
+    count = send_athlete_data_alerts_safely(
+        [],
+        [],
+        send_fn=fail_send,
+        send_alerts_fn=lambda *args, **kwargs: fail_send(),
+    )
+
+    assert count == 0
+    assert "Athlete data alert DM failed: zulip unavailable" in capsys.readouterr().err
 
 
 def test_screenshot_gap_alert_when_no_suunto_in_week(tmp_path: Path):
