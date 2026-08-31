@@ -1306,6 +1306,8 @@ def build_coach_interpret_prompt(
         "workout_text / session_date:\n"
         "- Only populate when intent is gym_session_log.\n"
         "- workout_text must include every exercise and set line from the message.\n"
+        "- Keep any RPE lines (e.g. 'RPE 5' or easy/moderate/hard) with the exercise "
+        "they follow.\n"
         "- null for other intents.\n\n"
         "body_weight_kg / max_hr_bpm:\n"
         "- Only populate when intent is profile_update.\n"
@@ -1843,10 +1845,10 @@ def collect_gym_descriptions(
 def _apply_session_rpe_from_transcript(
     metrics: GymSessionMetrics, transcript: str
 ) -> GymSessionMetrics:
-    from gym_program import overlay_session_rpe_on_record
+    from gym_program import overlay_transcript_rpe_on_record
 
     rec = {"gym": metrics.to_dict()}
-    if overlay_session_rpe_on_record(rec, transcript):
+    if overlay_transcript_rpe_on_record(rec, transcript):
         return GymSessionMetrics.from_dict(rec["gym"])
     return metrics
 
@@ -4096,6 +4098,7 @@ def record_gym_session_from_zulip(
     recorded_at: Optional[datetime] = None,
     session_hint_date: Optional[date] = None,
     body_weight_kg: Optional[float] = None,
+    rpe_transcript: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Parse a DM workout transcript and persist under athlete gym_logs/."""
     records = record_gym_sessions_from_zulip_for_athletes(
@@ -4107,6 +4110,7 @@ def record_gym_session_from_zulip(
         zulip_sender_email=zulip_sender_email,
         recorded_at=recorded_at,
         session_hint_date=session_hint_date,
+        rpe_transcript=rpe_transcript,
     )
     return records[0]
 
@@ -4118,9 +4122,10 @@ def record_gym_sessions_from_zulip_for_athletes(
     token: str,
     *,
     zulip_message_id: Optional[int] = None,
-    zulip_sender_email: str = "",
     recorded_at: Optional[datetime] = None,
+    zulip_sender_email: str = "",
     session_hint_date: Optional[date] = None,
+    rpe_transcript: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Parse a gym log once and persist an identical copy per recipient."""
     if not recipients:
@@ -4156,7 +4161,13 @@ def record_gym_sessions_from_zulip_for_athletes(
         gym_dict = parsed.to_dict()
         gym_dict["activity_id"] = 0
         gym_dict["activity_name"] = "Gym (Zulip DM)"
+        from gym_program import overlay_transcript_rpe_on_record
 
+        overlay_transcript_rpe_on_record(
+            {"gym": gym_dict}, rpe_transcript or workout_text
+        )
+
+    persist_text = (rpe_transcript or workout_text)[:8000]
     return [
         _persist_zulip_gym_log(
             cache_dir,
@@ -4167,7 +4178,7 @@ def record_gym_sessions_from_zulip_for_athletes(
             zulip_sender_email=zulip_sender_email,
             recorded_at=recorded_at,
             session_date=session_date,
-            raw_text=workout_text,
+            raw_text=persist_text,
             body_weight_kg=body_weight_kg,
         )
         for athlete_id, athlete_label, body_weight_kg in recipients

@@ -21,6 +21,8 @@ from gym_program import (
     parse_rpe_follow_up_reply,
     extract_session_rpe_from_transcript,
     overlay_session_rpe_on_record,
+    overlay_exercise_rpe_on_record,
+    overlay_transcript_rpe_on_record,
     personalize_plan_gym_loads,
     apply_rpe_to_last_working_set,
     progression_decision,
@@ -303,6 +305,110 @@ def test_gym_log_missing_rpe_only_checks_last_weighted_set():
             ]
         }
     }
+    assert gym_log_missing_rpe(record) is False
+
+
+_JACK_PER_EXERCISE_RPE = """@**coach** gym this morning with @**James Merrett**
+1. Back squat
+10r 20, 6r 80, 8r 70, 10r 60
+RPE 5
+2. Romanian deadlift
+10r 20, 6r 70, 8r 60, 10r 50
+RPE 4
+3. Bulgarian split squat
+5r 20, 6r 40, 8r 30, 10r 25
+RPE 4
+4. Plank
+60s, 60s, 60s
+RPE 5
+"""
+
+
+def _leg_day_record_without_rpe() -> dict:
+    return {
+        "gym": {
+            "exercises": [
+                {
+                    "name": "Back squat",
+                    "sets": [
+                        {"reps": 10, "weight_kg": 20.0},
+                        {"reps": 6, "weight_kg": 80.0},
+                        {"reps": 8, "weight_kg": 70.0},
+                        {"reps": 10, "weight_kg": 60.0},
+                    ],
+                },
+                {
+                    "name": "Romanian deadlift",
+                    "sets": [
+                        {"reps": 10, "weight_kg": 20.0},
+                        {"reps": 6, "weight_kg": 70.0},
+                        {"reps": 8, "weight_kg": 60.0},
+                        {"reps": 10, "weight_kg": 50.0},
+                    ],
+                },
+                {
+                    "name": "Bulgarian split squat",
+                    "sets": [
+                        {"reps": 10, "weight_kg": 20.0},
+                        {"reps": 12, "weight_kg": 40.0},
+                        {"reps": 16, "weight_kg": 30.0},
+                        {"reps": 20, "weight_kg": 25.0},
+                    ],
+                },
+                {
+                    "name": "Plank",
+                    "sets": [
+                        {"reps": 1, "weight_kg": 0.0, "duration_sec": 60},
+                        {"reps": 1, "weight_kg": 0.0, "duration_sec": 60},
+                        {"reps": 1, "weight_kg": 0.0, "duration_sec": 60},
+                    ],
+                },
+            ]
+        }
+    }
+
+
+def test_overlay_exercise_rpe_from_athlete_message():
+    record = _leg_day_record_without_rpe()
+    assert overlay_exercise_rpe_on_record(record, _JACK_PER_EXERCISE_RPE) is True
+    exercises = {ex["name"]: ex["sets"] for ex in record["gym"]["exercises"]}
+    assert exercises["Back squat"][-1]["rpe"] == 5.0
+    assert exercises["Back squat"][0].get("rpe") is None
+    assert exercises["Romanian deadlift"][-1]["rpe"] == 4.0
+    assert exercises["Bulgarian split squat"][-1]["rpe"] == 4.0
+    assert exercises["Plank"][-1]["rpe"] == 5.0
+    assert gym_log_missing_rpe(record) is False
+
+
+def test_overlay_exercise_rpe_does_not_overwrite_existing():
+    record = _leg_day_record_without_rpe()
+    record["gym"]["exercises"][0]["sets"][-1]["rpe"] = 8.0
+    overlay_exercise_rpe_on_record(record, _JACK_PER_EXERCISE_RPE)
+    assert record["gym"]["exercises"][0]["sets"][-1]["rpe"] == 8.0
+    assert record["gym"]["exercises"][1]["sets"][-1]["rpe"] == 4.0
+
+
+def test_overlay_transcript_rpe_keeps_session_only_on_last_weighted_set():
+    record = {
+        "gym": {
+            "exercises": [
+                {
+                    "name": "Back squat",
+                    "sets": [
+                        {"reps": 8, "weight_kg": 40.0},
+                        {"reps": 5, "weight_kg": 80.0},
+                    ],
+                },
+                {
+                    "name": "Plank",
+                    "sets": [{"reps": 1, "weight_kg": 0.0, "duration_sec": 60}],
+                },
+            ]
+        }
+    }
+    assert overlay_transcript_rpe_on_record(record, "RPE 4") is True
+    squat_sets = record["gym"]["exercises"][0]["sets"]
+    assert squat_sets[1]["rpe"] == 4.0
     assert gym_log_missing_rpe(record) is False
 
 

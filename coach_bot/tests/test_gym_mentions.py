@@ -22,6 +22,21 @@ from generate_training_plan import (
     apply_rpe_follow_up_from_zulip,
 )
 
+_JACK_PER_EXERCISE_RPE = """@**coach|99** gym this morning with @**James Merrett**
+1. Back squat
+10r 20, 6r 80, 8r 70, 10r 60
+RPE 5
+2. Romanian deadlift
+10r 20, 6r 70, 8r 60, 10r 50
+RPE 4
+3. Bulgarian split squat
+5r 20, 6r 40, 8r 30, 10r 25
+RPE 4
+4. Plank
+60s, 60s, 60s
+RPE 5
+"""
+
 
 def _parsed_gym() -> GymSessionMetrics:
     return GymSessionMetrics(
@@ -248,6 +263,92 @@ def _patch_gym_log_handler(monkeypatch, handler: CoachMessageHandler):
     )
 
 
+def _parsed_leg_day_without_rpe() -> GymSessionMetrics:
+    return GymSessionMetrics(
+        activity_id=0,
+        activity_name="Gym (Zulip DM)",
+        total_tonnage_kg=5100.0,
+        exercises=[
+            GymExerciseMetrics(
+                name="Back squat",
+                max_weight_kg=80.0,
+                tonnage_kg=1540.0,
+                sets=[
+                    GymSetMetrics(reps=10, weight_kg=20.0),
+                    GymSetMetrics(reps=6, weight_kg=80.0),
+                    GymSetMetrics(reps=8, weight_kg=70.0),
+                    GymSetMetrics(reps=10, weight_kg=60.0),
+                ],
+            ),
+            GymExerciseMetrics(
+                name="Romanian deadlift",
+                max_weight_kg=70.0,
+                tonnage_kg=1420.0,
+                sets=[
+                    GymSetMetrics(reps=10, weight_kg=20.0),
+                    GymSetMetrics(reps=6, weight_kg=70.0),
+                    GymSetMetrics(reps=8, weight_kg=60.0),
+                    GymSetMetrics(reps=10, weight_kg=50.0),
+                ],
+            ),
+            GymExerciseMetrics(
+                name="Bulgarian split squat",
+                max_weight_kg=40.0,
+                tonnage_kg=1430.0,
+                sets=[
+                    GymSetMetrics(reps=10, weight_kg=20.0),
+                    GymSetMetrics(reps=12, weight_kg=40.0),
+                    GymSetMetrics(reps=16, weight_kg=30.0),
+                    GymSetMetrics(reps=20, weight_kg=25.0),
+                ],
+            ),
+            GymExerciseMetrics(
+                name="Plank",
+                max_weight_kg=0.0,
+                tonnage_kg=0.0,
+                sets=[
+                    GymSetMetrics(reps=1, weight_kg=0.0),
+                    GymSetMetrics(reps=1, weight_kg=0.0),
+                    GymSetMetrics(reps=1, weight_kg=0.0),
+                ],
+            ),
+        ],
+    )
+
+
+def test_record_gym_overlays_per_exercise_rpe_from_original_message(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "generate_training_plan.parse_gym_session_metrics",
+        lambda *_args, **_kwargs: _parsed_leg_day_without_rpe(),
+    )
+    recorded = datetime(2026, 8, 31, 2, 33, tzinfo=timezone.utc)
+    records = record_gym_sessions_from_zulip_for_athletes(
+        tmp_path,
+        [(1, "Jack H", 82.0)],
+        "1. Back squat: 10r 20, 6r 80, 8r 70, 10r 60\n"
+        "2. Romanian deadlift: 10r 20, 6r 70, 8r 60, 10r 50\n"
+        "3. Bulgarian split squat: 5r 20, 6r 40, 8r 30, 10r 25\n"
+        "4. Plank: 60s, 60s, 60s",
+        "token",
+        zulip_message_id=106786,
+        zulip_sender_email="jack@example.com",
+        recorded_at=recorded,
+        session_hint_date=recorded.date(),
+        rpe_transcript=_JACK_PER_EXERCISE_RPE,
+    )
+    from gym_program import gym_log_missing_rpe
+
+    gym = records[0]["gym"]
+    by_name = {ex["name"]: ex["sets"] for ex in gym["exercises"]}
+    assert by_name["Back squat"][-1]["rpe"] == 5.0
+    assert by_name["Romanian deadlift"][-1]["rpe"] == 4.0
+    assert by_name["Bulgarian split squat"][-1]["rpe"] == 4.0
+    assert by_name["Plank"][-1]["rpe"] == 5.0
+    assert gym_log_missing_rpe(records[0]) is False
+
+
 def test_stream_gym_with_last_set_rpe_does_not_ask(tmp_path, monkeypatch):
     handler = _handler(tmp_path)
     _patch_gym_log_handler(monkeypatch, handler)
@@ -274,6 +375,51 @@ def test_stream_gym_with_last_set_rpe_does_not_ask(tmp_path, monkeypatch):
     assert "How hard" not in reply
     jack = load_gym_logs_for_athlete(tmp_path, 1)[0]
     assert jack["gym"]["exercises"][0]["sets"][0]["rpe"] == 4.0
+
+
+def test_stream_gym_per_exercise_rpe_does_not_ask_when_llm_strips_rpe(
+    tmp_path, monkeypatch
+):
+    handler = _handler(tmp_path)
+    _patch_gym_log_handler(monkeypatch, handler)
+    monkeypatch.setattr(
+        "coach_bot.handler.interpret_coach_message_with_kagi",
+        lambda *_args, **_kwargs: CoachInterpretation(
+            intent="gym_session_log",
+            reply="Logged 5100 kg.",
+            workout_text=(
+                "1. Back squat: 10r 20, 6r 80, 8r 70, 10r 60\n"
+                "2. Romanian deadlift: 10r 20, 6r 70, 8r 60, 10r 50\n"
+                "3. Bulgarian split squat: 5r 20, 6r 40, 8r 30, 10r 25\n"
+                "4. Plank: 60s, 60s, 60s"
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "generate_training_plan.parse_gym_session_metrics",
+        lambda *_args, **_kwargs: _parsed_leg_day_without_rpe(),
+    )
+    ref = datetime(2026, 8, 31, 2, 33, tzinfo=timezone.utc)
+    reply = handler._reply_kagi(
+        _JACK_PER_EXERCISE_RPE,
+        ref,
+        {
+            "id": 106786,
+            "sender_id": 101,
+            "sender_email": "jack@example.com",
+            "sender_full_name": "Jack H",
+            "content": _JACK_PER_EXERCISE_RPE,
+            "type": "stream",
+            "timestamp": ref.timestamp(),
+        },
+    )
+    assert "How hard" not in reply
+    jack = load_gym_logs_for_athlete(tmp_path, 1)[0]
+    by_name = {ex["name"]: ex["sets"] for ex in jack["gym"]["exercises"]}
+    assert by_name["Back squat"][-1]["rpe"] == 5.0
+    assert by_name["Romanian deadlift"][-1]["rpe"] == 4.0
+    assert by_name["Bulgarian split squat"][-1]["rpe"] == 4.0
+    assert by_name["Plank"][-1]["rpe"] == 5.0
 
 
 def test_stream_gym_log_credits_sender_and_mentions(tmp_path, monkeypatch):

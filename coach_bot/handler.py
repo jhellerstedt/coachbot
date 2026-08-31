@@ -1012,6 +1012,7 @@ class CoachMessageHandler:
                     zulip_sender_email=str(message.get("sender_email") or ""),
                     recorded_at=ref,
                     session_hint_date=session_hint,
+                    rpe_transcript=text,
                 )
                 pending = [
                     (int(rec["athlete_id"]), str(rec["id"]))
