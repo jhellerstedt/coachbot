@@ -54,6 +54,34 @@ def _reply(
     return int(msg_id) if msg_id is not None else None
 
 
+def _ensure_stream_subscription(client: zulip.Client, stream: str) -> None:
+    """Subscribe the bot to its listen channel if it is not already.
+
+    Generic bots start with no channel subscriptions. Mentions still
+    deliver messages, but reaction events go to channel subscribers
+    (plus users with a UserMessage row). Official bot docs require
+    subscribing to any channel the bot should process.
+    """
+    if not stream:
+        return
+    try:
+        subs = client.get_subscriptions()
+    except Exception as exc:
+        print(f"Could not list subscriptions: {exc}", flush=True)
+        return
+    names = {
+        str(s.get("name") or "")
+        for s in (subs.get("subscriptions") or [])
+    }
+    if stream in names:
+        return
+    result = client.add_subscriptions([{"name": stream}])
+    print(
+        f"Bot subscription to {stream}: {result.get('result')} {result.get('msg', '')}",
+        flush=True,
+    )
+
+
 def main() -> None:
     env_path = Path(__file__).resolve().parent / ".env"
     if env_path.is_file():
@@ -105,9 +133,15 @@ def main() -> None:
         f"(cache={cache_dir}, tz={plan_tz}, bot={bot_email})",
         flush=True,
     )
+    _ensure_stream_subscription(client, stream)
 
     def process_event(event: dict) -> None:
         if event.get("type") == "reaction":
+            print(
+                f"reaction op={event.get('op')} emoji={event.get('emoji_name')} "
+                f"message_id={event.get('message_id')} user_id={event.get('user_id')}",
+                flush=True,
+            )
             reply = handler.handle_reaction(event)
             if not reply:
                 return
