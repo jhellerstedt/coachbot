@@ -1,7 +1,11 @@
+from types import SimpleNamespace
+
 from athlete_data_alerts import (
+    SUUNTO_SYNC_FAIL_MESSAGE,
     AthleteDataAlert,
     format_alert_dm,
     merge_alerts,
+    send_athlete_data_alerts,
     should_send_alert,
     source_mapped_for_athlete,
 )
@@ -86,3 +90,48 @@ def test_format_and_merge_alerts():
     assert list(merged) == [JACK]
     assert "did not sync" in merged[JACK].message
     assert "matching indoor row" in merged[JACK].message
+
+
+def test_merge_dedupes_identical_messages():
+    a1 = AthleteDataAlert(JACK, "Jack H", "suunto", SUUNTO_SYNC_FAIL_MESSAGE)
+    a2 = AthleteDataAlert(JACK, "Jack H", "suunto", SUUNTO_SYNC_FAIL_MESSAGE)
+    merged = merge_alerts([a1, a2])
+    assert merged[JACK].message == SUUNTO_SYNC_FAIL_MESSAGE
+
+
+def test_merge_mixed_source():
+    suunto = AthleteDataAlert(JACK, "Jack H", "suunto", "Suunto issue")
+    screenshot = AthleteDataAlert(JACK, "Jack H", "screenshot", "Screenshot issue")
+    merged = merge_alerts([suunto, screenshot])
+    assert merged[JACK].source == "mixed"
+    body = format_alert_dm(merged[JACK])
+    assert "**Coachbot data issue**" in body
+    assert "Suunto issue" in body
+    assert "Screenshot issue" in body
+
+
+def test_send_athlete_data_alerts_filters_by_mapping():
+    jack = SimpleNamespace(
+        id=JACK, zulip_user_id=73, zulip_email=None, token_dir=None
+    )
+    emil = SimpleNamespace(
+        id=EMIL, zulip_user_id=77, zulip_email=None, token_dir=None
+    )
+    alerts = [
+        AthleteDataAlert(JACK, "Jack H", "suunto", "sync failed"),
+        AthleteDataAlert(EMIL, "Emil", "suunto", "sync failed"),
+    ]
+    sent: list[tuple[str, list[int | str]]] = []
+
+    def send_fn(content: str, recipients: list[int | str]) -> None:
+        sent.append((content, recipients))
+
+    count = send_athlete_data_alerts(
+        alerts,
+        [jack, emil],
+        send_fn=send_fn,
+        suunto_cfg=_suunto(),
+    )
+    assert count == 1
+    assert len(sent) == 1
+    assert sent[0][1] == [73]

@@ -20,11 +20,23 @@ SUUNTO_SCREENSHOT_GAP_MESSAGE = (
     "until Suunto syncs."
 )
 
-_SOURCE_LABELS = {
-    "suunto": "Suunto",
-    "strava": "Strava",
-    "screenshot": "logged erg stats",
+_TITLE_BY_SOURCE = {
+    "suunto": "**Coachbot could not refresh your Suunto data**",
+    "strava": "**Coachbot could not refresh your Strava data**",
+    "screenshot": "**Coachbot could not refresh your logged erg stats**",
 }
+
+
+def _default_suunto_cfg() -> SuuntoCfg:
+    return SuuntoCfg(
+        enabled=True,
+        primary=True,
+        suuntool_path=None,
+        session_file=None,
+        indoor_rowing_activity_ids=frozenset({57}),
+        gym_activity_ids=frozenset({23}),
+        athlete_ids=None,
+    )
 
 
 @dataclass(frozen=True)
@@ -88,26 +100,32 @@ def should_send_alert(
 
 def merge_alerts(alerts: Sequence[AthleteDataAlert]) -> dict[int, AthleteDataAlert]:
     merged: dict[int, AthleteDataAlert] = {}
+    messages_by_athlete: dict[int, list[str]] = {}
+    sources_by_athlete: dict[int, set[str]] = {}
     for alert in alerts:
         existing = merged.get(alert.athlete_id)
         if existing is None:
             merged[alert.athlete_id] = alert
+            messages_by_athlete[alert.athlete_id] = [alert.message]
+            sources_by_athlete[alert.athlete_id] = {alert.source}
             continue
-        parts = [p for p in existing.message.split("\n\n") if p]
-        if alert.message not in parts:
-            parts.append(alert.message)
+        messages = messages_by_athlete[alert.athlete_id]
+        if alert.message not in messages:
+            messages.append(alert.message)
+        sources = sources_by_athlete[alert.athlete_id]
+        sources.add(alert.source)
+        source = "mixed" if len(sources) > 1 else next(iter(sources))
         merged[alert.athlete_id] = AthleteDataAlert(
             alert.athlete_id,
-            alert.label,
-            alert.source,
-            "\n\n".join(parts),
+            existing.label,
+            source,
+            "\n\n".join(messages),
         )
     return merged
 
 
 def format_alert_dm(alert: AthleteDataAlert) -> str:
-    source_label = _SOURCE_LABELS.get(alert.source, alert.source)
-    title = f"**Coachbot could not refresh your {source_label} data**"
+    title = _TITLE_BY_SOURCE.get(alert.source, "**Coachbot data issue**")
     footer = "_This is not your weekly plan._"
     return f"{title}\n\n{alert.message}\n\n{footer}"
 
@@ -117,8 +135,10 @@ def send_athlete_data_alerts(
     athletes: Sequence[object],
     *,
     send_fn: Callable[[str, list[int | str]], object],
-    suunto_cfg: SuuntoCfg,
+    suunto_cfg: SuuntoCfg | None = None,
 ) -> int:
+    if suunto_cfg is None:
+        suunto_cfg = _default_suunto_cfg()
     by_id = {athlete.id: athlete for athlete in athletes}
     sendable: list[AthleteDataAlert] = []
     for alert in alerts:
