@@ -422,6 +422,54 @@ def test_stream_gym_per_exercise_rpe_does_not_ask_when_llm_strips_rpe(
     assert by_name["Plank"][-1]["rpe"] == 5.0
 
 
+def test_stream_gym_strips_llm_rpe_ask_and_fake_log_block(tmp_path, monkeypatch):
+    handler = _handler(tmp_path)
+    _patch_gym_log_handler(monkeypatch, handler)
+    monkeypatch.setattr(
+        "coach_bot.handler.interpret_coach_message_with_kagi",
+        lambda *_args, **_kwargs: CoachInterpretation(
+            intent="gym_session_log",
+            reply=(
+                "Nice work on the gym session! **Jack H** **Logged gym session** "
+                "(`bf4c187c-89e3-4d83-85d4-8c65c52eb5a2`, 2026-08-31) — 2795 kg. "
+                "How hard did the last set feel? Reply with RPE 1–10, or "
+                "easy / moderate / hard / max effort."
+            ),
+            workout_text="1. Back squat: 10r 20, 6r 80, 8r 70, 10r 60",
+        ),
+    )
+    monkeypatch.setattr(
+        "generate_training_plan.parse_gym_session_metrics",
+        lambda *_args, **_kwargs: _parsed_leg_day_without_rpe(),
+    )
+    ref = datetime(2026, 8, 31, 3, 48, tzinfo=timezone.utc)
+    collapsed = (
+        "gym this morning with 1. Back squat 10r 20, 6r 80, 8r 70, 10r 60 "
+        "RPE 5 2. Romanian deadlift 10r 20, 6r 70, 8r 60, 10r 50 RPE 4 "
+        "3. Bulgarian split squat 5r 20, 6r 40, 8r 30, 10r 25 RPE 4 "
+        "4. Plank 60s, 60s, 60s RPE 5"
+    )
+    reply = handler._reply_kagi(
+        collapsed,
+        ref,
+        {
+            "id": 106793,
+            "sender_id": 101,
+            "sender_email": "jack@example.com",
+            "sender_full_name": "Jack H",
+            "content": _JACK_PER_EXERCISE_RPE,
+            "type": "stream",
+            "timestamp": ref.timestamp(),
+        },
+    )
+    assert "How hard" not in reply
+    assert "bf4c187c" not in reply
+    jack = load_gym_logs_for_athlete(tmp_path, 1)[0]
+    assert jack["id"] in reply
+    by_name = {ex["name"]: ex["sets"] for ex in jack["gym"]["exercises"]}
+    assert by_name["Bulgarian split squat"][-1]["rpe"] == 4.0
+
+
 def test_stream_gym_log_credits_sender_and_mentions(tmp_path, monkeypatch):
     handler = _handler(tmp_path)
     _patch_gym_log_handler(monkeypatch, handler)
@@ -554,6 +602,30 @@ def test_thumbs_down_deletes_only_reactor_copy(tmp_path):
     assert "gym-sarah" in reply
     assert find_gym_log_by_id(tmp_path, 2, "gym-sarah") is None
     assert find_gym_log_by_id(tmp_path, 1, "gym-jack") is not None
+
+
+def test_thumbs_down_by_original_sender_deletes_all_shared_copies(tmp_path):
+    _save_shared_gym_copies(
+        tmp_path,
+        coach_reply_zulip_message_id=555010,
+        zulip_sender_email="jack@example.com",
+    )
+    handler = _handler(tmp_path)
+    with _bot_config_patch(handler):
+        reply = handler.handle_reaction(
+            {
+                "type": "reaction",
+                "op": "add",
+                "emoji_name": "thumbs_down",
+                "user_id": 101,
+                "message_id": 555010,
+            }
+        )
+    assert reply is not None
+    assert "gym-jack" in reply
+    assert "gym-sarah" in reply
+    assert find_gym_log_by_id(tmp_path, 1, "gym-jack") is None
+    assert find_gym_log_by_id(tmp_path, 2, "gym-sarah") is None
 
 
 def test_thumbs_down_by_non_recipient_is_refused(tmp_path):

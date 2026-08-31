@@ -9,6 +9,7 @@ from coach_bot.config import CoachAthleteCfg
 from coach_bot.handler import (
     CoachMessageHandler,
     _parse_logged_gym_session_id,
+    _parse_logged_gym_session_ids,
 )
 from generate_training_plan import (
     find_gym_log_by_id,
@@ -68,6 +69,19 @@ def _sample_gym_record(**overrides) -> dict:
 def test_parse_logged_gym_session_id_strips_trailing_date():
     content = "**Logged gym session** (`gym-log-abc`, 2026-06-29)\n\n"
     assert _parse_logged_gym_session_id(content) == "gym-log-abc"
+
+
+def test_parse_logged_gym_session_ids_from_html_confirmation():
+    html = (
+        "<p><strong>Logged gym session</strong> "
+        "(<code>1665d8ca-26cd-4dfb-aea1-12931c5cbcd0</code>, 2026-08-31)</p>"
+        "<p><strong>Logged gym session</strong> "
+        "(<code>0585380f-f94b-4745-b89b-eed837769e51</code>, 2026-08-31)</p>"
+    )
+    assert _parse_logged_gym_session_ids(html) == [
+        "1665d8ca-26cd-4dfb-aea1-12931c5cbcd0",
+        "0585380f-f94b-4745-b89b-eed837769e51",
+    ]
 
 
 def test_format_gym_log_confirmation_includes_log_id():

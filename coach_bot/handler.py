@@ -19,6 +19,7 @@ from generate_training_plan import (
     find_erg_score_for_reaction_message,
     find_gym_log_by_id,
     find_gym_log_for_reaction_message,
+    list_gym_logs_sharing_zulip_message,
     find_latest_elaboration_pending_erg_score,
     local_datetime_from_timestamp,
     enqueue_plan_adjustment,
@@ -387,19 +388,39 @@ class CoachMessageHandler:
         log_id = str(record.get("id") or "")
         if not log_id:
             return None
-        if not delete_gym_log_record(self.cache_dir, athlete_id, log_id):
-            print(
-                f"Thumbs-down delete failed for gym log {log_id} "
-                f"(athlete {athlete_id})",
-                flush=True,
+        to_delete: List[tuple[int, Dict[str, Any]]] = [(athlete_id, record)]
+        sender_email = str(record.get("zulip_sender_email") or "").strip().lower()
+        reactor_email = str(reactor.zulip_email or "").strip().lower()
+        shared_mid = record.get("zulip_message_id")
+        if sender_email and reactor_email == sender_email and shared_mid is not None:
+            shared = list_gym_logs_sharing_zulip_message(
+                self.cache_dir, int(shared_mid)
             )
+            if shared:
+                to_delete = shared
+        removed_ids: List[str] = []
+        for del_aid, del_rec in to_delete:
+            del_id = str(del_rec.get("id") or "")
+            if not del_id:
+                continue
+            if delete_gym_log_record(self.cache_dir, del_aid, del_id):
+                removed_ids.append(del_id)
+            else:
+                print(
+                    f"Thumbs-down delete failed for gym log {del_id} "
+                    f"(athlete {del_aid})",
+                    flush=True,
+                )
+        if not removed_ids:
             return (
                 f"I found gym log `{log_id}` but couldn't delete it from disk. "
                 "Check bot file permissions on the gym log cache."
             )
         session_day = record.get("session_date") or "?"
+        id_list = ", ".join(f"`{i}`" for i in removed_ids)
+        noun = "session" if len(removed_ids) == 1 else "sessions"
         return (
-            f"Removed the logged gym session (`{log_id}`, {session_day}). "
+            f"Removed the logged gym {noun} ({id_list}, {session_day}). "
             "Send a corrected workout when you're ready."
         )
 
@@ -530,7 +551,7 @@ class CoachMessageHandler:
         content = str(message.get("content") or "")
         return bool(
             _parse_logged_gym_session_id(content)
-            or "**Logged gym session**" in content
+            or "Logged gym session" in content
         )
 
     def _handle_erg_score_screenshot(
@@ -982,6 +1003,10 @@ class CoachMessageHandler:
         except Exception as exc:
             return f"Sorry, I could not reach the LLM API: {exc}"
         reply = interpretation.reply.strip()
+        if interpretation.intent == "gym_session_log":
+            from gym_program import sanitize_gym_session_llm_reply
+
+            reply = sanitize_gym_session_llm_reply(reply)
         recipients = resolve_gym_log_recipients(
             athletes or self.athletes,
             sender_email=str(message.get("sender_email") or ""),
@@ -1003,6 +1028,9 @@ class CoachMessageHandler:
                 except ValueError:
                     session_hint = today
             try:
+                rpe_transcript = strip_zulip_mentions(
+                    str(message.get("content") or "")
+                ) or text
                 gym_records = record_gym_sessions_from_zulip_for_athletes(
                     self.cache_dir,
                     [(a.id, a.label, a.body_weight_kg) for a in recipients],
@@ -1012,7 +1040,7 @@ class CoachMessageHandler:
                     zulip_sender_email=str(message.get("sender_email") or ""),
                     recorded_at=ref,
                     session_hint_date=session_hint,
-                    rpe_transcript=text,
+                    rpe_transcript=rpe_transcript,
                 )
                 pending = [
                     (int(rec["athlete_id"]), str(rec["id"]))
@@ -1150,8 +1178,9 @@ _LOGGED_ERG_SCORE_ID_RE = re.compile(
     re.DOTALL,
 )
 _LOGGED_GYM_SESSION_ID_RE = re.compile(
-    r"\*\*Logged gym session\*\* \(`([^`]+)`",
-    re.DOTALL,
+    r"(?:\*\*Logged gym session\*\*|<strong>Logged gym session</strong>)"
+    r"\s*\((?:<code>)?`?([^`<,\s)]+)`?(?:</code>)?",
+    re.I | re.DOTALL,
 )
 _THUMBS_DOWN_EMOJI_NAMES = frozenset({"thumbs_down", "thumbsdown", "-1"})
 
