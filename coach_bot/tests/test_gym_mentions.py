@@ -628,6 +628,56 @@ def test_thumbs_down_by_original_sender_deletes_all_shared_copies(tmp_path):
     assert find_gym_log_by_id(tmp_path, 2, "gym-sarah") is None
 
 
+def test_thumbs_down_original_sender_matches_zulip_dummy_email(tmp_path):
+    """Zulip email-privacy stores sender as user{id}@realm, not the athlete's login email."""
+    _save_shared_gym_copies(
+        tmp_path,
+        coach_reply_zulip_message_id=555010,
+        zulip_sender_email="user101@rrcc.imipolex.biz",
+    )
+    handler = _handler(tmp_path)
+    with _bot_config_patch(handler):
+        reply = handler.handle_reaction(
+            {
+                "type": "reaction",
+                "op": "add",
+                "emoji_name": "thumbs_down",
+                "user_id": 101,
+                "message_id": 555010,
+            }
+        )
+    assert reply is not None
+    assert "gym-jack" in reply
+    assert "gym-sarah" in reply
+    assert find_gym_log_by_id(tmp_path, 1, "gym-jack") is None
+    assert find_gym_log_by_id(tmp_path, 2, "gym-sarah") is None
+
+
+def test_thumbs_down_original_sender_deletes_leftover_teammate_copy(tmp_path):
+    """If the sender's copy is already gone, 👎 still removes teammate copies they logged."""
+    _save_shared_gym_copies(
+        tmp_path,
+        coach_reply_zulip_message_id=555010,
+        zulip_sender_email="user101@rrcc.imipolex.biz",
+    )
+    gym_logs = tmp_path / "athlete_1" / "gym_logs" / "gym-jack.json"
+    gym_logs.unlink()
+    handler = _handler(tmp_path)
+    with _bot_config_patch(handler):
+        reply = handler.handle_reaction(
+            {
+                "type": "reaction",
+                "op": "add",
+                "emoji_name": "thumbs_down",
+                "user_id": 101,
+                "message_id": 555010,
+            }
+        )
+    assert reply is not None
+    assert "gym-sarah" in reply
+    assert find_gym_log_by_id(tmp_path, 2, "gym-sarah") is None
+
+
 def test_thumbs_down_by_non_recipient_is_refused(tmp_path):
     _save_shared_gym_copies(tmp_path, coach_reply_zulip_message_id=555010)
     handler = _handler(tmp_path)

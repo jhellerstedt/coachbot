@@ -374,14 +374,24 @@ class CoachMessageHandler:
                 reacted_message_id, athlete_id=reactor.id
             )
         if found is None:
-            if self._message_looks_like_gym_log_confirmation(reacted_message_id):
+            found = find_gym_log_for_reaction_message(
+                self.cache_dir, reacted_message_id
+            )
+            if found is None:
+                found = self._find_gym_log_from_coach_message(reacted_message_id)
+            if found is None:
+                if self._message_looks_like_gym_log_confirmation(reacted_message_id):
+                    return (
+                        "Only the athlete who logged that session can remove it with 👎."
+                    )
+                return None
+            if not _reactor_is_original_gym_sender(reactor, found[1]):
                 return (
                     "Only the athlete who logged that session can remove it with 👎."
                 )
-            return None
 
         athlete_id, record = found
-        auth = self._authorize_log_removal(event, athlete_id)
+        auth = self._authorize_log_removal(event, athlete_id, record=record)
         if auth is not None:
             return auth
 
@@ -389,10 +399,11 @@ class CoachMessageHandler:
         if not log_id:
             return None
         to_delete: List[tuple[int, Dict[str, Any]]] = [(athlete_id, record)]
-        sender_email = str(record.get("zulip_sender_email") or "").strip().lower()
-        reactor_email = str(reactor.zulip_email or "").strip().lower()
         shared_mid = record.get("zulip_message_id")
-        if sender_email and reactor_email == sender_email and shared_mid is not None:
+        if (
+            _reactor_is_original_gym_sender(reactor, record)
+            and shared_mid is not None
+        ):
             shared = list_gym_logs_sharing_zulip_message(
                 self.cache_dir, int(shared_mid)
             )
@@ -425,7 +436,10 @@ class CoachMessageHandler:
         )
 
     def _authorize_log_removal(
-        self, event: Dict[str, Any], athlete_id: int
+        self,
+        event: Dict[str, Any],
+        athlete_id: int,
+        record: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """Return an error reply when removal is not allowed, else None."""
         reactor = self._resolve_reactor_from_reaction(event)
@@ -436,11 +450,13 @@ class CoachMessageHandler:
                 sender_full_name=str(user.get("full_name") or ""),
                 sender_id=_reaction_user_id(event),
             )
-        if reactor.id != athlete_id:
-            return (
-                "Only the athlete who logged that session can remove it with 👎."
-            )
-        return None
+        if reactor.id == athlete_id:
+            return None
+        if record is not None and _reactor_is_original_gym_sender(reactor, record):
+            return None
+        return (
+            "Only the athlete who logged that session can remove it with 👎."
+        )
 
     def _resolve_reactor_from_reaction(
         self, event: Dict[str, Any]
@@ -1183,6 +1199,33 @@ _LOGGED_GYM_SESSION_ID_RE = re.compile(
     re.I | re.DOTALL,
 )
 _THUMBS_DOWN_EMOJI_NAMES = frozenset({"thumbs_down", "thumbsdown", "-1"})
+
+
+def _reactor_is_original_gym_sender(
+    reactor: CoachAthleteCfg, record: Dict[str, Any]
+) -> bool:
+    """True when the reactor posted the Zulip message that created this gym log.
+
+    Zulip email-privacy often stores ``sender_email`` as ``user{id}@realm``
+    rather than the athlete's login email in config.
+    """
+    reactor_user_id = reactor.zulip_user_id
+    raw_sender_id = record.get("zulip_sender_id")
+    if raw_sender_id is not None and reactor_user_id is not None:
+        try:
+            if int(raw_sender_id) == int(reactor_user_id):
+                return True
+        except (TypeError, ValueError):
+            pass
+    sender_email = str(record.get("zulip_sender_email") or "").strip().lower()
+    reactor_email = str(reactor.zulip_email or "").strip().lower()
+    if sender_email and reactor_email and sender_email == reactor_email:
+        return True
+    if sender_email and reactor_user_id is not None:
+        local = sender_email.split("@", 1)[0]
+        if local == f"user{int(reactor_user_id)}":
+            return True
+    return False
 
 
 def _reaction_user_id(event: Dict[str, Any]) -> Optional[int]:
