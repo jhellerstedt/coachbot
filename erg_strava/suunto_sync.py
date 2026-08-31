@@ -53,6 +53,7 @@ __all__ = [
     "summarize_suunto_rowing_metrics_by_key",
     "sync_suunto_erg_for_athlete",
     "sync_suunto_workouts_for_athlete",
+    "sync_suunto_workouts_for_athlete_detailed",
 ]
 
 
@@ -402,9 +403,30 @@ def sync_suunto_workouts_for_athlete(
     config_base: Path,
     refresh: bool = False,
 ) -> int:
-    """List Suunto erg + gym workouts and download metadata/FIT (no Strava matching)."""
+    """Sync Suunto workouts while preserving the legacy integer return."""
+    synced, _ = sync_suunto_workouts_for_athlete_detailed(
+        athlete_id=athlete_id,
+        athlete_label=athlete_label,
+        cache_dir=cache_dir,
+        cfg=cfg,
+        config_base=config_base,
+        refresh=refresh,
+    )
+    return synced
+
+
+def sync_suunto_workouts_for_athlete_detailed(
+    *,
+    athlete_id: int,
+    athlete_label: str,
+    cache_dir: Path,
+    cfg: SuuntoCfg,
+    config_base: Path,
+    refresh: bool = False,
+) -> tuple[int, Optional[str]]:
+    """Sync workouts and return an error from client setup or workout listing."""
     if not cfg.enabled:
-        return 0
+        return 0, None
 
     paths = suunto_paths(cache_dir, athlete_id)
     paths["fits"].mkdir(parents=True, exist_ok=True)
@@ -417,14 +439,14 @@ def sync_suunto_workouts_for_athlete(
         who = client.whoami()
     except (FileNotFoundError, RuntimeError) as e:
         print(f"[{athlete_label}] Suunto sync skipped: {e}", file=sys.stderr)
-        return 0
+        return 0, str(e)
 
     username = str(who.get("username") or "")
     try:
         items = client.list_workouts(cfg.list_since_days)
-    except RuntimeError as e:
+    except (FileNotFoundError, RuntimeError) as e:
         print(f"[{athlete_label}] Suunto workouts list failed: {e}", file=sys.stderr)
-        return 0
+        return 0, str(e)
 
     tracked_ids = cfg.indoor_rowing_activity_ids | cfg.gym_activity_ids
     n_synced = 0
@@ -525,7 +547,7 @@ def sync_suunto_workouts_for_athlete(
         f"{hr_ok} with HR in FIT"
         + (f", {n_synced} FIT downloaded" if n_synced else "")
     )
-    return n_synced
+    return n_synced, None
 
 
 def link_suunto_workouts_to_strava(

@@ -484,6 +484,23 @@ def load_weekly_plan(cache_dir: Path, week_id: str) -> Optional[WeeklyPlanRecord
     return WeeklyPlanRecord.from_dict(data)
 
 
+def list_weekly_plan_records(cache_dir: Path) -> List[Dict[str, Any]]:
+    """Load cached squad plan records newest week first, skipping invalid files."""
+    root = weekly_plans_dir(cache_dir)
+    if not root.is_dir():
+        return []
+    records: List[Dict[str, Any]] = []
+    for path in root.glob("*.json"):
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(data, dict):
+            records.append(data)
+    records.sort(key=lambda record: str(record.get("week_id") or ""), reverse=True)
+    return records
+
+
 def athlete_weekly_plans_dir(cache_dir: Path, athlete_id: int) -> Path:
     return cache_dir / f"athlete_{athlete_id}" / "weekly_plans"
 
@@ -6101,6 +6118,7 @@ def generate_squad_weekly_plan(
     peak_kg_by_exercise: Optional[Mapping[str, float]] = None,
     prev_plan_json: Optional[Dict[str, Any]] = None,
     gym_lift_review: Optional[str] = None,
+    gym_week_index: Optional[int] = None,
 ) -> GeneratedWeeklyPlan:
     """
     Squad weekly plan for the public channel: session structure with squad-average
@@ -6225,27 +6243,57 @@ def generate_squad_weekly_plan(
         plan_week=plan_week,
         prose_fallback=lambda: _call_llm(system, user, token, history=history),
     )
-    if generated.plan_json:
-        patched = apply_library_sessions_to_plan(
-            generated.plan_json, session_selections
-        )
-        if include_lifting:
-            from gym_program import apply_program_gym_to_plan, next_gym_week_index
+    from gym_program import apply_program_gym_to_plan, next_gym_week_index
+    from squad_plan_fallback import build_library_squad_plan_json
 
-            patched = apply_program_gym_to_plan(
-                patched,
+    week_index = (
+        next_gym_week_index(prev_plan_json)
+        if gym_week_index is None
+        else gym_week_index
+    )
+    plan_json = generated.plan_json
+    if plan_json is None:
+        print(
+            "Weekly plan: structured JSON failed; using library/gym fallback.",
+            flush=True,
+        )
+        plan_json = build_library_squad_plan_json(
+            plan_week=plan_week,
+            phase=phase or "base",
+            include_lifting=include_lifting,
+            peak_kg_by_exercise=peak_kg_by_exercise or {},
+            prev_plan_json=prev_plan_json,
+            session_selections=session_selections,
+            week_index=week_index,
+        )
+    else:
+        plan_json = apply_library_sessions_to_plan(plan_json, session_selections)
+        if include_lifting:
+            plan_json = apply_program_gym_to_plan(
+                plan_json,
                 phase=phase,
-                week_index=next_gym_week_index(prev_plan_json),
+                week_index=week_index,
                 peak_kg_by_exercise=peak_kg_by_exercise,
                 prev_plan_json=prev_plan_json,
             )
-        parsed = parse_weekly_plan(patched)
-        if parsed is not None:
-            return GeneratedWeeklyPlan(
-                plan_json=patched,
-                plan_text=render_plan_text(parsed),
-            )
-    return generated
+    parsed = parse_weekly_plan(plan_json)
+    if parsed is None:
+        plan_json = build_library_squad_plan_json(
+            plan_week=plan_week,
+            phase=phase or "base",
+            include_lifting=include_lifting,
+            peak_kg_by_exercise=peak_kg_by_exercise or {},
+            prev_plan_json=prev_plan_json,
+            session_selections=session_selections,
+            week_index=week_index,
+        )
+        parsed = parse_weekly_plan(plan_json)
+    if parsed is None:
+        raise ValueError("library/gym squad plan fallback failed validation")
+    return GeneratedWeeklyPlan(
+        plan_json=plan_json,
+        plan_text=render_plan_text(parsed),
+    )
 
 
 def get_kagi_weekly_plan(
@@ -7377,31 +7425,45 @@ def run_weekly_training_pipeline(
         )
 
     from session_library import recent_session_ids_from_plan
+    from gym_program import next_gym_week_index_from_plans
 
-    generated_plan = generate_squad_weekly_plan(
-        training_summary,
-        token,
-        include_lifting=include_lifting,
-        plan_week=target_week,
-        adherence_review=adherence_review,
-        goal_tracking=goal_tracking,
-        gym_tonnage_summary=gym_tonnage_summary,
-        gym_exercise_history=gym_exercise_history,
-        previous_week_gym_exercises=previous_week_gym_exercises,
-        coach_adjustments=coach_adjustments,
-        zulip_topic_feedback=zulip_topic_feedback,
-        season_week_context=season_week_context,
-        phase=phase,
-        recent_session_ids=recent_session_ids_from_plan(
-            prev_record.plan_json if prev_record else None
-        ),
-        peak_kg_by_exercise=peak_kg_by_exercise,
-        prev_plan_json=prev_record.plan_json if prev_record else None,
-        gym_lift_review=gym_lift_review,
+    gym_week_index = next_gym_week_index_from_plans(
+        list_weekly_plan_records(cache_dir)
     )
+    try:
+        generated_plan = generate_squad_weekly_plan(
+            training_summary,
+            token,
+            include_lifting=include_lifting,
+            plan_week=target_week,
+            adherence_review=adherence_review,
+            goal_tracking=goal_tracking,
+            gym_tonnage_summary=gym_tonnage_summary,
+            gym_exercise_history=gym_exercise_history,
+            previous_week_gym_exercises=previous_week_gym_exercises,
+            coach_adjustments=coach_adjustments,
+            zulip_topic_feedback=zulip_topic_feedback,
+            season_week_context=season_week_context,
+            phase=phase,
+            recent_session_ids=recent_session_ids_from_plan(
+                prev_record.plan_json if prev_record else None
+            ),
+            peak_kg_by_exercise=peak_kg_by_exercise,
+            prev_plan_json=prev_record.plan_json if prev_record else None,
+            gym_lift_review=gym_lift_review,
+            gym_week_index=gym_week_index,
+        )
+    except Exception as exc:
+        print(
+            f"CRITICAL: squad weekly plan generation failed: {exc}. "
+            "Trying deterministic library/gym fallback.",
+            flush=True,
+        )
+        generated_plan = GeneratedWeeklyPlan(plan_text="", plan_json=None)
     plan_json = generated_plan.plan_json
     prev_json = prev_record.plan_json if prev_record else None
-    plan_json, align_log = apply_season_master_plan_alignment(
+    pre_alignment_plan_json = plan_json
+    aligned_plan_json, align_log = apply_season_master_plan_alignment(
         cache_dir,
         season_cfg_obj,
         target_week,
@@ -7412,27 +7474,42 @@ def run_weekly_training_pipeline(
     )
     if align_log.strip():
         print(align_log, flush=True)
-    if plan_json is not None:
-        from weekly_plan_schema import parse_weekly_plan, render_plan_text
+    if parse_weekly_plan(aligned_plan_json) is not None:
+        plan_json = aligned_plan_json
+    elif parse_weekly_plan(pre_alignment_plan_json) is not None:
+        plan_json = pre_alignment_plan_json
+    else:
+        plan_json = None
+    if plan_json is None:
+        from squad_plan_fallback import build_library_squad_plan_json
 
-        parsed_squad = parse_weekly_plan(plan_json)
-        plan_text = (
-            finalize_plan_text_for_display(
-                render_plan_text(parsed_squad), plan_json
+        try:
+            plan_json = build_library_squad_plan_json(
+                plan_week=target_week,
+                phase=phase or "base",
+                include_lifting=include_lifting,
+                peak_kg_by_exercise=peak_kg_by_exercise or {},
+                prev_plan_json=prev_json,
+                week_index=gym_week_index,
             )
-            if parsed_squad is not None
-            else finalize_plan_text_for_display(
-                generated_plan.plan_text, plan_json
+        except Exception as exc:
+            print(
+                f"CRITICAL: deterministic squad plan fallback failed: {exc}",
+                flush=True,
             )
+            plan_json = None
+    parsed_squad = parse_weekly_plan(plan_json)
+    if parsed_squad is None:
+        print(
+            "CRITICAL: no usable structured squad plan JSON; continuing the "
+            "weekly cron without saving or posting a plan.",
+            flush=True,
         )
+        plan_json = None
+        plan_text = generated_plan.plan_text.strip()
     else:
         plan_text = finalize_plan_text_for_display(
-            generated_plan.plan_text, plan_json
-        )
-    if plan_json is None:
-        print(
-            "Weekly plan: structured JSON generation failed; saved prose-only plan.",
-            flush=True,
+            render_plan_text(parsed_squad), plan_json
         )
 
     record = WeeklyPlanRecord(
@@ -7448,9 +7525,10 @@ def run_weekly_training_pipeline(
         goal_tracking=goal_tracking,
         gym_tonnage_summary=gym_tonnage_summary,
     )
-    save_weekly_plan(cache_dir, record)
-    if pending_adjustments:
-        consume_plan_adjustments(cache_dir)
+    if record.plan_json is not None:
+        save_weekly_plan(cache_dir, record)
+        if pending_adjustments:
+            consume_plan_adjustments(cache_dir)
 
     intensity_cap_report: Optional[str] = None
     if season_config is not None and season_cfg_obj is not None:
@@ -7513,7 +7591,7 @@ def run_weekly_training_pipeline(
         except Exception as exc:
             print(f"Season master plan update skipped: {exc}", flush=True)
 
-    if send_athlete_plan_dms and plan_text.strip():
+    if send_athlete_plan_dms and plan_json is not None and plan_text.strip():
         pipeline_athletes = load_pipeline_athletes(config_path)
         send_weekly_athlete_plan_dms(
             cache_dir,

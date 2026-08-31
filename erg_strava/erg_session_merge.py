@@ -1050,7 +1050,7 @@ def athlete_has_week_training_log(
     erg_types: frozenset = DEFAULT_ERG_SPORT_TYPES,
     require_trainer_for_rowing: bool = True,
 ) -> bool:
-    """True if the athlete logged any Strava or erg (merged/screenshot) sessions in week."""
+    """True for Strava, merged/screenshot erg, or Zulip gym logs in the week."""
     if load_athlete_index_activities(
         cache_dir,
         athlete_id,
@@ -1067,7 +1067,11 @@ def athlete_has_week_training_log(
         week_start=week.week_start,
         week_end=week.week_end,
     )
-    return bool(sessions)
+    if sessions:
+        return True
+    from generate_training_plan import load_gym_logs_for_athlete
+
+    return bool(load_gym_logs_for_athlete(cache_dir, athlete_id, week=week))
 
 
 def format_athlete_week_training_log(

@@ -106,6 +106,26 @@ def test_rotation_replaces_exercise_after_configured_weeks():
     assert rotation.with_name in after_names
 
 
+def test_build_and_base_rotate_accessory_after_one_week():
+    for phase in ("base", "build"):
+        program = load_program(phase)
+        assert program.rotations[0].after_weeks == 1
+        before, _ = materialize_week(program, week_index=0)
+        after, _ = materialize_week(program, week_index=1)
+        assert "Bulgarian split squat" in [e.name for e in before.exercises]
+        assert "Kettlebell swings" in [e.name for e in after.exercises]
+        assert "Bulgarian split squat" not in [e.name for e in after.exercises]
+
+
+def test_next_gym_week_index_from_plans_skips_missing_meta():
+    from gym_program import next_gym_week_index_from_plans
+
+    assert next_gym_week_index_from_plans([{"plan_json": None}]) == 0
+    assert next_gym_week_index_from_plans(
+        [{"plan_json": None}, {"plan_json": {"gym_program": {"week_index": 0}}}]
+    ) == 1
+
+
 def test_median_latest_peak_kg_per_athlete():
     metrics = {
         1: {

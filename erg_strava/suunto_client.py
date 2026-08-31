@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
@@ -60,19 +61,40 @@ def suunto_sync_enabled_for_athlete(cfg: SuuntoCfg, athlete_id: int) -> bool:
 
 
 def resolve_suuntool_binary(cfg: SuuntoCfg, base: Path) -> Path:
+    candidates: list[Path] = []
+    configured: Path | None = None
+
     if cfg.suuntool_path:
-        p = cfg.suuntool_path if cfg.suuntool_path.is_absolute() else (base / cfg.suuntool_path)
-        p = p.resolve()
-        if p.is_file():
-            return p
-        raise FileNotFoundError(f"suuntool not found at configured path: {p}")
-    for candidate in (
-        base / "bin" / "suuntool",
-        base.parent / "bin" / "suuntool",
-        Path(shutil.which("suuntool") or ""),
-    ):
+        configured = (
+            cfg.suuntool_path
+            if cfg.suuntool_path.is_absolute()
+            else (base / cfg.suuntool_path)
+        )
+        configured = configured.resolve()
+        candidates.append(configured)
+
+    candidates.extend(
+        [
+            base / "bin" / "suuntool",
+            base.parent / "bin" / "suuntool",
+            base.parent.parent / "RRC-scripts" / "bin" / "suuntool",
+            Path.home() / "RRC-scripts" / "bin" / "suuntool",
+        ]
+    )
+    which_path = shutil.which("suuntool")
+    if which_path:
+        candidates.append(Path(which_path))
+
+    for candidate in candidates:
         if candidate and candidate.is_file():
-            return candidate.resolve()
+            found = candidate.resolve()
+            if configured is not None and not configured.is_file() and found != configured:
+                print(
+                    f"suuntool: configured path missing ({configured}); using {found}",
+                    file=sys.stderr,
+                )
+            return found
+
     raise FileNotFoundError(
         "suuntool binary not found. Install via "
         "'brew install tajchert/tap/suuntool' or place a release binary in erg_strava/../bin/suuntool"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from strava_erg_hr_plot import (
     activity_fingerprint,
     athlete_paths,
     collect_all_points,
+    format_new_erg_data_summary,
     photo_cfg_hash,
     write_parsed_activity_cache,
 )
@@ -133,3 +135,35 @@ def test_collect_all_points_keeps_suunto_cache_for_listed_athlete(tmp_path: Path
     assert not df.empty
     assert set(df["athlete"].unique()) == {"Jack H"}
     assert set(df["suunto_key"].dropna().unique()) == {SUUNTO_KEY}
+
+
+def test_caption_lists_screenshot_when_no_new_suunto_keys(tmp_path: Path):
+    scores = tmp_path / f"athlete_{JACK_ID}" / "erg_scores"
+    scores.mkdir(parents=True)
+    (scores / "screenshot-1.json").write_text(
+        json.dumps(
+            {
+                "id": "screenshot-1",
+                "session_date": "2026-08-27",
+                "source": "zulip_screenshot_vision_multi",
+                "metrics": {"distance_m": 8170},
+            }
+        )
+    )
+    df = pd.DataFrame({"suunto_key": [SUUNTO_KEY]})
+
+    text = format_new_erg_data_summary(
+        df,
+        [AthleteCfg(id=JACK_ID, label="Jack H", token_dir=None)],
+        tmp_path,
+        frozenset({"VirtualRow", "Rowing"}),
+        True,
+        {
+            "run_at": "2026-08-23T10:00:00+00:00",
+            "suunto_keys": [SUUNTO_KEY],
+        },
+    )
+
+    assert text is not None
+    assert "screenshot screenshot-1, 8170 m, 2026-08-27" in text
+    assert "(none)" not in text
