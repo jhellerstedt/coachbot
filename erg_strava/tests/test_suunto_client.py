@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import suunto_client
+import suunto_sync
 from suunto_client import SuuntoCfg, resolve_suuntool_binary
+from suunto_sync import sync_suunto_workouts_for_athlete_detailed
 
 
 def _cfg(path: Path | None) -> SuuntoCfg:
@@ -60,3 +62,20 @@ def test_resolve_raises_when_nothing_exists(tmp_path: Path, monkeypatch):
         assert "suuntool" in str(exc).lower()
     else:
         raise AssertionError("expected FileNotFoundError")
+
+
+def test_detailed_sync_returns_suunto_client_error(tmp_path: Path, monkeypatch):
+    message = "suuntool not found in configured or fallback paths"
+
+    def raise_missing(*args, **kwargs):
+        raise FileNotFoundError(message)
+
+    monkeypatch.setattr(suunto_sync, "SuuntoClient", raise_missing)
+
+    assert sync_suunto_workouts_for_athlete_detailed(
+        athlete_id=53603359,
+        athlete_label="Jack H",
+        cache_dir=tmp_path,
+        cfg=_cfg(None),
+        config_base=tmp_path,
+    ) == (0, message)

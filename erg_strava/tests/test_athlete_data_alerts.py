@@ -1,3 +1,6 @@
+from datetime import date, datetime, timezone
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from athlete_data_alerts import (
@@ -5,10 +8,13 @@ from athlete_data_alerts import (
     AthleteDataAlert,
     format_alert_dm,
     merge_alerts,
+    screenshot_without_suunto_alert,
     send_athlete_data_alerts,
     should_send_alert,
     source_mapped_for_athlete,
 )
+from generate_training_plan import week_bounds_from_monday
+from strava_erg_hr_plot import collect_suunto_alerts
 from suunto_client import SuuntoCfg
 
 JACK = 53603359
@@ -150,3 +156,112 @@ def test_send_athlete_data_alerts_filters_by_mapping():
     assert count == 1
     assert len(sent) == 1
     assert sent[0][1] == [73]
+
+
+def test_screenshot_gap_alert_when_no_suunto_in_week(tmp_path: Path):
+    week = week_bounds_from_monday(date(2026, 8, 24))
+    scores = tmp_path / f"athlete_{JACK}" / "erg_scores"
+    scores.mkdir(parents=True)
+    (scores / "abc.json").write_text(
+        json.dumps(
+            {
+                "id": "abc",
+                "athlete_id": JACK,
+                "session_date": "2026-08-27",
+                "source": "zulip_screenshot_vision_multi",
+                "metrics": {
+                    "duration_sec": 2160,
+                    "avg_hr": 141,
+                    "distance_m": 8170,
+                },
+            }
+        )
+    )
+
+    alert = screenshot_without_suunto_alert(
+        tmp_path, JACK, "Jack H", week, _suunto()
+    )
+
+    assert alert is not None
+    assert alert.source == "suunto"
+
+
+def test_no_gap_alert_without_screenshot(tmp_path: Path):
+    week = week_bounds_from_monday(date(2026, 8, 24))
+    (tmp_path / f"athlete_{JACK}").mkdir()
+
+    assert (
+        screenshot_without_suunto_alert(
+            tmp_path, JACK, "Jack H", week, _suunto()
+        )
+        is None
+    )
+
+
+def test_no_gap_alert_when_suunto_erg_exists_in_week(tmp_path: Path):
+    week = week_bounds_from_monday(date(2026, 8, 24))
+    athlete_dir = tmp_path / f"athlete_{JACK}"
+    scores = athlete_dir / "erg_scores"
+    scores.mkdir(parents=True)
+    (scores / "abc.json").write_text(
+        json.dumps(
+            {
+                "id": "abc",
+                "athlete_id": JACK,
+                "session_date": "2026-08-27",
+                "source": "zulip_screenshot_vision_multi",
+            }
+        )
+    )
+    suunto = athlete_dir / "suunto"
+    suunto.mkdir()
+    start = datetime(2026, 8, 27, 8, tzinfo=timezone.utc)
+    (suunto / "index.json").write_text(
+        json.dumps(
+            {
+                "workouts": {
+                    "wk": {
+                        "key": "wk",
+                        "activityId": 57,
+                        "startTime": int(start.timestamp() * 1000),
+                    }
+                }
+            }
+        )
+    )
+
+    assert (
+        screenshot_without_suunto_alert(
+            tmp_path, JACK, "Jack H", week, _suunto()
+        )
+        is None
+    )
+
+
+def test_sync_error_takes_precedence_over_screenshot_gap(tmp_path: Path):
+    week = week_bounds_from_monday(date(2026, 8, 24))
+    scores = tmp_path / f"athlete_{JACK}" / "erg_scores"
+    scores.mkdir(parents=True)
+    (scores / "abc.json").write_text(
+        json.dumps(
+            {
+                "id": "abc",
+                "athlete_id": JACK,
+                "session_date": "2026-08-27",
+                "source": "zulip_screenshot_vision_multi",
+            }
+        )
+    )
+    athletes = [SimpleNamespace(id=JACK, label="Jack H")]
+
+    alerts = collect_suunto_alerts(
+        athletes,
+        cache_dir=tmp_path,
+        week=week,
+        suunto_cfg=_suunto(),
+        sync_errors={JACK: "suuntool not found"},
+    )
+
+    assert alerts == [
+        AthleteDataAlert(JACK, "Jack H", "suunto", SUUNTO_SYNC_FAIL_MESSAGE)
+    ]

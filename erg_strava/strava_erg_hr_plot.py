@@ -70,6 +70,12 @@ from concept2_photo_splits import (
     pick_largest_photo_url,
     save_manifest,
 )
+from athlete_data_alerts import (
+    SUUNTO_SYNC_FAIL_MESSAGE,
+    AthleteDataAlert,
+    screenshot_without_suunto_alert,
+    send_athlete_data_alerts,
+)
 from generate_training_plan import (
     DEFAULT_GYM_NAME_PATTERNS,
     DEFAULT_GYM_SPORT_TYPES,
@@ -79,6 +85,7 @@ from generate_training_plan import (
     week_bounds_from_monday,
     build_training_summary,
     is_gym_activity,
+    load_pipeline_athletes,
     plan_week_bounds,
     format_public_weekly_plan_post,
     post_plan_to_zulip,
@@ -89,7 +96,7 @@ from generate_training_plan import (
     week_contains,
     weekly_plans_dir,
 )
-from send_to_zulip import send_png_to_zulip
+from send_to_zulip import send_png_to_zulip, send_private_message_to_zulip
 from strava_token_client import get_strava_client
 from strava_transport import StravalibStravaTransport, StravaHttpResponse, StravaTransport
 from erg_parse import (
@@ -114,7 +121,7 @@ from suunto_sync import (
     suunto_start_dt,
     suunto_workout_as_activity,
     suunto_sync_enabled_for_athlete,
-    sync_suunto_workouts_for_athlete,
+    sync_suunto_workouts_for_athlete_detailed,
 )
 
 # Zulip destination shared with lighties/lighties-2k-tt.py.
@@ -935,6 +942,7 @@ def sync_athlete(
     gym_cfg: GymCfg,
     full_sync: bool = False,
     refresh_suunto: bool = False,
+    suunto_sync_errors: Optional[Dict[int, str]] = None,
 ) -> bool:
     """Sync one athlete (Suunto-first). Returns False only when Strava required but unavailable."""
     paths = athlete_paths(cache_dir, acfg.id)
@@ -949,7 +957,7 @@ def sync_athlete(
     parsed_manifest = load_parsed_manifest(paths)
 
     if suunto_sync_enabled_for_athlete(suunto_cfg, acfg.id):
-        sync_suunto_workouts_for_athlete(
+        _, suunto_error = sync_suunto_workouts_for_athlete_detailed(
             athlete_id=acfg.id,
             athlete_label=acfg.label,
             cache_dir=cache_dir,
@@ -957,6 +965,8 @@ def sync_athlete(
             config_base=config_base,
             refresh=refresh_suunto,
         )
+        if suunto_error is not None and suunto_sync_errors is not None:
+            suunto_sync_errors[acfg.id] = suunto_error
     elif suunto_cfg.enabled:
         print(
             f"[{acfg.label}] Suunto sync skipped (not listed in suunto.athlete_ids).",
@@ -1161,6 +1171,42 @@ def sync_athlete(
     prune_parsed_cache(paths, parsed_manifest, active_manifest_keys)
     save_parsed_manifest(paths, parsed_manifest)
     return True
+
+
+def collect_suunto_alerts(
+    athletes: List[object],
+    *,
+    cache_dir: Path,
+    week: WeekBounds,
+    suunto_cfg: SuuntoCfg,
+    sync_errors: Mapping[int, str],
+) -> List[AthleteDataAlert]:
+    alerts: List[AthleteDataAlert] = []
+    for athlete in athletes:
+        athlete_id = int(getattr(athlete, "id"))
+        label = str(getattr(athlete, "label"))
+        if not suunto_sync_enabled_for_athlete(suunto_cfg, athlete_id):
+            continue
+        if sync_errors.get(athlete_id):
+            alerts.append(
+                AthleteDataAlert(
+                    athlete_id,
+                    label,
+                    "suunto",
+                    SUUNTO_SYNC_FAIL_MESSAGE,
+                )
+            )
+            continue
+        gap_alert = screenshot_without_suunto_alert(
+            cache_dir,
+            athlete_id,
+            label,
+            week,
+            suunto_cfg,
+        )
+        if gap_alert is not None:
+            alerts.append(gap_alert)
+    return alerts
 
 
 def _activity_cache_has_hr(
@@ -2106,6 +2152,7 @@ def main() -> None:
         creds = resolve_available_strava_credentials(athletes, config_base)
         transport: Optional[StravaTransport] = None
         token_owner_id: Optional[int] = None
+        suunto_sync_errors: Dict[int, str] = {}
         if creds is None:
             if strava_cfg.optional:
                 print(
@@ -2143,6 +2190,7 @@ def main() -> None:
                     gym_cfg=gym_cfg,
                     full_sync=args.full_sync,
                     refresh_suunto=args.refresh_suunto,
+                    suunto_sync_errors=suunto_sync_errors,
                 ):
                     continue
                 if acfg_transport is not None and not args.no_kagi:
@@ -2176,6 +2224,31 @@ def main() -> None:
         finally:
             if transport is not None:
                 transport.close()
+        if not args.no_zulip:
+            pipeline_athletes = load_pipeline_athletes(cfg_path)
+            alerts = collect_suunto_alerts(
+                pipeline_athletes,
+                cache_dir=cache_dir,
+                week=previous_week_bounds(plan_week_bounds()),
+                suunto_cfg=suunto_cfg,
+                sync_errors=suunto_sync_errors,
+            )
+            zuliprc = Path(
+                os.environ.get(
+                    "ZULIPRC_PATH",
+                    str(_ERG_DIR.parent / "rrcc-zuliprc"),
+                )
+            )
+            send_athlete_data_alerts(
+                alerts,
+                pipeline_athletes,
+                send_fn=lambda content, to, **k: send_private_message_to_zulip(
+                    content,
+                    to,
+                    zuliprc_path=zuliprc,
+                ),
+                suunto_cfg=suunto_cfg,
+            )
 
     df = collect_all_points(
         athletes,

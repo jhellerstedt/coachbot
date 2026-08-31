@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
+from generate_training_plan import WeekBounds, load_erg_scores_for_week, week_contains
 from suunto_client import SuuntoCfg, suunto_sync_enabled_for_athlete
+from suunto_sync import list_suunto_erg_workouts, suunto_start_dt
 
 SUUNTO_SYNC_FAIL_MESSAGE = (
     "Your Suunto workouts did not sync this week, so watch/HR streams and "
@@ -45,6 +47,30 @@ class AthleteDataAlert:
     label: str
     source: str
     message: str
+
+
+def screenshot_without_suunto_alert(
+    cache_dir: Path,
+    athlete_id: int,
+    label: str,
+    week: WeekBounds,
+    suunto_cfg: SuuntoCfg,
+) -> Optional[AthleteDataAlert]:
+    if not suunto_sync_enabled_for_athlete(suunto_cfg, athlete_id):
+        return None
+    scores = load_erg_scores_for_week(cache_dir, athlete_id, week)
+    if not any("screenshot" in str(score.get("source")) for score in scores):
+        return None
+    for workout in list_suunto_erg_workouts(cache_dir, athlete_id, suunto_cfg):
+        start = suunto_start_dt(workout)
+        if start is not None and week_contains(week, start):
+            return None
+    return AthleteDataAlert(
+        athlete_id=athlete_id,
+        label=label,
+        source="suunto",
+        message=SUUNTO_SCREENSHOT_GAP_MESSAGE,
+    )
 
 
 def zulip_recipient(
