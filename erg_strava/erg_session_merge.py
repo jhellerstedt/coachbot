@@ -1067,7 +1067,11 @@ def athlete_has_week_training_log(
         week_start=week.week_start,
         week_end=week.week_end,
     )
-    return bool(sessions)
+    if sessions:
+        return True
+    from generate_training_plan import load_gym_logs_for_athlete
+
+    return bool(load_gym_logs_for_athlete(cache_dir, athlete_id, week=week))
 
 
 def format_athlete_week_training_log(

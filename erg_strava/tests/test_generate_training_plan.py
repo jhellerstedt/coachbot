@@ -315,6 +315,21 @@ def test_generate_athlete_plan_locks_when_llm_returns_prose_only(monkeypatch):
     assert not result.plan_text.strip().startswith("### Monday")
 
 
+def test_gym_log_counts_as_week_training_log(tmp_path):
+    from datetime import date
+
+    from erg_session_merge import athlete_has_week_training_log
+    from generate_training_plan import week_bounds_from_monday
+
+    week = week_bounds_from_monday(date(2026, 8, 24))
+    gym = tmp_path / "athlete_1" / "gym_logs"
+    gym.mkdir(parents=True)
+    (gym / "g1.json").write_text(
+        '{"session_date": "2026-08-26", "gym": {"total_tonnage_kg": 5000}}'
+    )
+    assert athlete_has_week_training_log(tmp_path, 1, "James", week)
+
+
 def test_send_weekly_dm_locks_instead_of_prose_when_json_missing(
     monkeypatch, tmp_path
 ):
