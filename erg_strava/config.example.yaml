@@ -100,6 +100,8 @@ suunto:
   # Limit API sync and KDE Suunto streams to athletes with a Suunto account.
   # Omit = all athletes (wrong when suuntool is a single login).
   athlete_ids: [53603359]
+  # If this path is missing, coachbot tries ../bin/suuntool, ../../RRC-scripts/bin/suuntool,
+  # ~/RRC-scripts/bin/suuntool, and PATH. Mapped Suunto athletes get a Zulip DM on failure.
   # suuntool_path: ../bin/suuntool
   # session_file: ~/.config/suuntool/session.json
   indoor_rowing_activity_ids: [57]
