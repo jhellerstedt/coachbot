@@ -15,7 +15,7 @@ cp coach_bot/.env.example coach_bot/.env
 # Edit config.yaml and .env (OpenRouter API key, athletes, cache_dir)
 ```
 
-Place your Zulip bot credentials at repo root as `rrcc-zuliprc` (or set `ZULIPRC_PATH`).
+Place your Zulip bot credentials at repo root as `zuliprc` (or set `ZULIPRC_PATH`).
 
 ## Run
 
@@ -37,7 +37,7 @@ cp coach_bot/.env.example coach_bot/.env
 docker compose -f coach_bot/docker-compose.yml up --build
 ```
 
-## Production (hellpi)
+## Production
 
 See [deploy/README.md](deploy/README.md). On the server:
 

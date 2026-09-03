@@ -633,7 +633,7 @@ def test_thumbs_down_original_sender_matches_zulip_dummy_email(tmp_path):
     _save_shared_gym_copies(
         tmp_path,
         coach_reply_zulip_message_id=555010,
-        zulip_sender_email="user101@rrcc.imipolex.biz",
+        zulip_sender_email="user101@zulip.example.com",
     )
     handler = _handler(tmp_path)
     with _bot_config_patch(handler):
@@ -658,7 +658,7 @@ def test_thumbs_down_original_sender_deletes_leftover_teammate_copy(tmp_path):
     _save_shared_gym_copies(
         tmp_path,
         coach_reply_zulip_message_id=555010,
-        zulip_sender_email="user101@rrcc.imipolex.biz",
+        zulip_sender_email="user101@zulip.example.com",
     )
     gym_logs = tmp_path / "athlete_1" / "gym_logs" / "gym-jack.json"
     gym_logs.unlink()

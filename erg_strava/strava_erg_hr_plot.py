@@ -2099,7 +2099,7 @@ def post_plot_to_zulip(
     topic: str = ZULIP_TOPIC,
     initial_comment: Optional[str] = None,
 ) -> bool:
-    """Upload the plot PNG to Zulip (credentials in repo-root ``rrcc-zuliprc``)."""
+    """Upload the plot PNG to Zulip (credentials in repo-root ``zuliprc``)."""
     if not png_path.is_file():
         print(f"Plot not found, skipping Zulip upload: {png_path}", file=sys.stderr)
         return False
@@ -2285,7 +2285,7 @@ def main() -> None:
             zuliprc = Path(
                 os.environ.get(
                     "ZULIPRC_PATH",
-                    str(_ERG_DIR.parent / "rrcc-zuliprc"),
+                    str(_ERG_DIR.parent / "zuliprc"),
                 )
             )
             send_athlete_data_alerts_safely(
@@ -2406,7 +2406,7 @@ def main() -> None:
             require_trainer_for_rowing=require_trainer,
             config_path=cfg_path,
             zuliprc_path=Path(
-                os.environ.get("ZULIPRC_PATH", str(_ERG_DIR.parent / "rrcc-zuliprc"))
+                os.environ.get("ZULIPRC_PATH", str(_ERG_DIR.parent / "zuliprc"))
             ),
             season_config=raw_config,
             refresh_season_plan=args.refresh_season_plan,

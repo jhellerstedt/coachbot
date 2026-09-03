@@ -102,9 +102,7 @@ In `resolve_suuntool_binary`, collect candidates in order:
 1. Configured path (absolute, or `base / relative`)
 2. `base / "bin" / "suuntool"`
 3. `base.parent / "bin" / "suuntool"`
-4. `base.parent.parent / "RRC-scripts" / "bin" / "suuntool"`
-5. `Path.home() / "RRC-scripts" / "bin" / "suuntool"`
-6. `shutil.which("suuntool")`
+4. `shutil.which("suuntool")`
 
 Return the first existing file. If the configured path was missing and a later candidate hit, `print` a one-line warning to stderr: `suuntool: configured path missing ({p}); using {found}`. Raise `FileNotFoundError` only if none exist.
 
@@ -829,8 +827,8 @@ EOF
 - [ ] **Step 1: Add a comment above `suuntool_path` in `config.example.yaml`**
 
 ```yaml
-  # If this path is missing, coachbot tries ../bin/suuntool, ../../RRC-scripts/bin/suuntool,
-  # ~/RRC-scripts/bin/suuntool, and PATH. Mapped Suunto athletes get a Zulip DM on failure.
+  # If this path is missing, coachbot tries ../bin/suuntool, ../../bin/suuntool, and PATH.
+  # Mapped Suunto athletes get a Zulip DM on failure.
   # suuntool_path: ../bin/suuntool
 ```
 
@@ -871,4 +869,4 @@ EOF
 
 ## Deploy note (not a code task)
 
-After merge, pull `main` on hellpi and restart the bot as usual. Confirm `resolve_suuntool_binary` logs the RRC-scripts binary (or copy/symlink into `~/coachbot/bin/suuntool`). The next Sunday run should DM Jack a plan (and only an error DM if Suunto still fails).
+After merge, pull `main` on the production host and restart the bot as usual. Confirm `resolve_suuntool_binary` finds `~/coachbot/bin/suuntool` (or PATH). The next Sunday run should DM Jack a plan (and only an error DM if Suunto still fails).

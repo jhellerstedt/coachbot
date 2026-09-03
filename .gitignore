@@ -16,8 +16,7 @@ erg_strava_browser_profile/
 .suunto/
 bin/suuntool
 
-rrcc-zuliprc
-zuliprc
+*zuliprc
 lighties/token.json
 lighties/strava_token*
 lighties/client_secret*.json

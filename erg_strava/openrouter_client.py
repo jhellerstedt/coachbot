@@ -18,7 +18,7 @@ DEFAULT_OPENROUTER_MODEL = "anthropic/claude-3.5-haiku"
 DEFAULT_OPENROUTER_VISION_MODEL = "google/gemini-2.5-flash"
 # Reliable json_schema model for weekly plan structured output.
 DEFAULT_OPENROUTER_STRUCTURED_MODEL = "openai/gpt-4o-mini"
-DEFAULT_HTTP_REFERER = "https://rrcc.imipolex.biz"
+DEFAULT_HTTP_REFERER = "https://example.com"
 DEFAULT_APP_TITLE = "rowing-coach-bot"
 
 

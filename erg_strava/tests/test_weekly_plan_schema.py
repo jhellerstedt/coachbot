@@ -632,7 +632,7 @@ def test_validate_rowing_interval_rest_rejects_flat_threshold_interval_label():
 
 
 def test_validate_rowing_interval_rest_rejects_live_flat_threshold_duration():
-    """Mirrors the hellpi post: label says intervals, duration is a blob without reps."""
+    """Mirrors a production post: label says intervals, duration is a blob without reps."""
     data = sample_squad_plan_dict()
     tuesday = data["days"][1]
     tuesday["session_subtype"] = None

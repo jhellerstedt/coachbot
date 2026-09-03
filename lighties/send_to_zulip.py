@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Post messages, images, and text files to a Zulip stream/topic.
 
-Credentials are read from a Zulip rc file (default: ``rrcc-zuliprc`` in the
+Credentials are read from a Zulip rc file (default: ``zuliprc`` in the
 repo root) with the standard layout::
 
     [api]
@@ -31,8 +31,8 @@ ZULIP_MAX_MESSAGE_LENGTH = 9500
 
 
 def default_zuliprc_path() -> Path:
-    """Locate ``rrcc-zuliprc`` next to the repo root (parent of ``lighties/``)."""
-    return Path(__file__).resolve().parent.parent / "rrcc-zuliprc"
+    """Locate ``zuliprc`` next to the repo root (parent of ``lighties/``)."""
+    return Path(__file__).resolve().parent.parent / "zuliprc"
 
 
 def load_zuliprc(path: Optional[Path] = None) -> dict:

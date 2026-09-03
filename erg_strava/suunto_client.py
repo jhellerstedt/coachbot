@@ -77,8 +77,6 @@ def resolve_suuntool_binary(cfg: SuuntoCfg, base: Path) -> Path:
         [
             base / "bin" / "suuntool",
             base.parent / "bin" / "suuntool",
-            base.parent.parent / "RRC-scripts" / "bin" / "suuntool",
-            Path.home() / "RRC-scripts" / "bin" / "suuntool",
         ]
     )
     which_path = shutil.which("suuntool")

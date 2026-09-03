@@ -1716,7 +1716,7 @@ def fetch_zulip_topic_feedback_since_last_session(
         return None
 
     repo_root = Path(__file__).resolve().parent.parent
-    rc = zuliprc_path or (repo_root / "rrcc-zuliprc")
+    rc = zuliprc_path or (repo_root / "zuliprc")
     if not rc.is_file():
         return None
     try:

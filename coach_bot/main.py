@@ -108,7 +108,7 @@ def main() -> None:
                 "Create a **Generic bot** in your Zulip organization "
                 "(Settings → Bots → Add bot → Generic bot), download its zuliprc, "
                 "subscribe that bot to your stream, and mount that file as "
-                "rrcc-zuliprc (or set ZULIPRC_PATH).\n\n"
+                "zuliprc (or set ZULIPRC_PATH).\n\n"
                 f"API response: {profile}"
             )
         raise SystemExit(f"Could not load bot profile: {profile}")

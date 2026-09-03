@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-31  
 **Status:** Draft (for implementation plan)  
-**Trigger:** Sunday 30 Aug weekly cron on hellpi. Public squad plan posted as prose-only; no athlete plan DMs; plot caption `new data since 2026-08-23: (none)`; logged erg stats ~0 min despite Jack’s Tue 27 Aug Zulip screenshot (8170 m / 36 min) and off-plan Suunto ergs; gym exercises identical to the previous week.
+**Trigger:** Sunday 30 Aug weekly cron. Public squad plan posted as prose-only; no athlete plan DMs; plot caption `new data since 2026-08-23: (none)`; logged erg stats ~0 min despite Jack’s Tue 27 Aug Zulip screenshot (8170 m / 36 min) and off-plan Suunto ergs; gym exercises identical to the previous week.
 
 **Related:** `docs/superpowers/specs/2026-08-24-athlete-plan-structure-lock-design.md` (athlete DMs require squad `plan_json`; this spec supplies that JSON when the LLM fails).
 
@@ -82,4 +82,4 @@ A 36 min screenshot at 141 bpm must contribute ~36 min to Z1–Z3 (or the matchi
 - DMing the public stream about Suunto outages
 - Adding Emil/James/Vini to `suunto.athlete_ids`
 - Live screenshot-ingest DMs inside the coach bot (weekly run only for this change)
-- Hellpi symlink (optional ops after deploy; code fallbacks should make it unnecessary)
+- Production symlink (optional ops after deploy; code fallbacks should make it unnecessary)

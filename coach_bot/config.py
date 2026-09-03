@@ -407,6 +407,6 @@ def load_bot_config() -> Tuple[Path, str, str, str, Path, List[CoachAthleteCfg]]
 
     stream = os.environ.get("ZULIP_STREAM", DEFAULT_STREAM)
     topic = os.environ.get("ZULIP_TOPIC", DEFAULT_TOPIC)
-    zuliprc = Path(os.environ.get("ZULIPRC_PATH", REPO_ROOT / "rrcc-zuliprc"))
+    zuliprc = Path(os.environ.get("ZULIPRC_PATH", REPO_ROOT / "zuliprc"))
     athletes = _load_athletes(raw, config_path)
     return cache_dir, stream, topic, plan_tz, zuliprc, athletes

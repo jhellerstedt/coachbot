@@ -13,6 +13,6 @@ COPY lighties/zulip_topic_context.py /app/lighties/zulip_topic_context.py
 ENV PYTHONPATH=/app:/app/erg_strava:/app/lighties
 ENV CONFIG_PATH=/app/config.yaml
 ENV CACHE_DIR=/data/cache
-ENV ZULIPRC_PATH=/app/rrcc-zuliprc
+ENV ZULIPRC_PATH=/app/zuliprc
 
 CMD ["python", "-m", "coach_bot.main"]

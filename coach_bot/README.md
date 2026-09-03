@@ -17,10 +17,10 @@ Inputs are routed by a cost/accuracy-aware conditional router (`erg_strava/docum
 
 1. Weekly plans in `erg_strava/erg_strava_cache/weekly_plans/` (same `cache_dir` as `config.yaml`; run `strava_erg_hr_plot.py` with `OPENROUTER_API_KEY`).
 2. `erg_strava/config.yaml` with `cache_dir`, `plan_timezone`, and per-athlete `zulip_email` (for erg score screenshot logging).
-3. **Generic Zulip bot** (not an incoming webhook) and its `zuliprc` at the repo root as `rrcc-zuliprc`.
+3. **Generic Zulip bot** (not an incoming webhook) and its `zuliprc` at the repo root.
    - Settings → Bots → **Add bot** → **Generic bot** → download `zuliprc`.
    - Incoming webhook bots only post via a URL; they cannot use the event queue this service needs.
-   - Your existing `rrcc-zuliprc` for `send_to_zulip.py` may be a different bot type; the coach bot needs its own generic bot (or replace credentials if you use one bot for both).
+   - If `send_to_zulip.py` already has a zuliprc, it may be a different bot type; the coach bot needs its own generic bot (or replace credentials if you use one bot for both).
 4. Subscribe that bot to stream `general` (or set `ZULIP_STREAM`). By default the bot listens on **all topics** in that stream; set `ZULIP_TOPIC=project-640` to restrict to one topic.
 5. `coach_bot/.env` with `OPENROUTER_API_KEY` (required for coach replies and weekly plan). Copy `coach_bot/.env.example` → `coach_bot/.env`.
 
@@ -37,7 +37,7 @@ docker compose -f coach_bot/docker-compose.yml up --build
 Mounts:
 
 - `erg_strava/erg_strava_cache` → plan JSON and adjustment queue (mounted as `/data/cache` in the container)
-- `rrcc-zuliprc` → bot credentials
+- `zuliprc` → bot credentials
 - `erg_strava/config.yaml` → timezone and cache path
 
 ## Run locally

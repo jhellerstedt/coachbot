@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Weekly erg plan + Strava/Suunto sync (cron on hellpi).
+# Weekly erg plan + Strava/Suunto sync (production cron).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

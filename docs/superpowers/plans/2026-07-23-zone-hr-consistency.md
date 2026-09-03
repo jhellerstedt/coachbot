@@ -75,7 +75,7 @@ def test_zone_zt_compatibility_accepts_z4_t6():
 - [ ] **Step 2: Run tests — expect FAIL**
 
 ```bash
-cd /Users/jack/GitHub/RRC-scripts
+cd /path/to/coachbot
 PYTHONPATH=erg_strava ./.venv/bin/python -m pytest \
   erg_strava/tests/test_weekly_plan_schema.py::test_zone_zt_compatibility_rejects_z2_t6 \
   erg_strava/tests/test_weekly_plan_schema.py::test_zone_zt_compatibility_accepts_z4_t6 -q
@@ -444,7 +444,7 @@ Expected: all PASS
 
 Build a personalised plan dict with Z4/T6 + 140–150 HR and confirm `validate_parsed_weekly_plan(..., athlete_profile=...)` returns an HR error; confirm squad finalize without profile still accepts coherent Z4/T6 with any HR.
 
-- [ ] **Step 3: Stop for commit/push/hellpi pull unless user requests**
+- [ ] **Step 3: Stop for commit/push/production pull unless user requests**
 
 ---
 
