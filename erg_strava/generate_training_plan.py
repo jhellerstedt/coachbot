@@ -1,8 +1,8 @@
 # Requires: OPENROUTER_API_KEY env var — https://openrouter.ai/keys
-# Optional: OPENROUTER_MODEL (default anthropic/claude-3.5-haiku)
+# Optional: OPENROUTER_MODEL (default openrouter/auto)
 # LLM calls use OpenRouter chat completions: POST https://openrouter.ai/api/v1/chat/completions
 #   Auth:  Authorization: Bearer <OPENROUTER_API_KEY>
-#   Body:  {"model": "...", "messages": [{"role": "system"|"user"|"assistant", "content": "..."}]}
+#   Body:  {"model": "openrouter/auto", "messages": [{"role": "system"|"user"|"assistant", "content": "..."}]}
 #   Resp:  response.json()["choices"][0]["message"]["content"]
 
 from __future__ import annotations

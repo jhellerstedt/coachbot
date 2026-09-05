@@ -1,14 +1,14 @@
 """Cost/accuracy-aware conditional router for document (text + image) inputs.
 
 The router inspects an input for an image attachment and dispatches to one of two
-OpenRouter branches:
+OpenRouter branches (both default to ``openrouter/auto``):
 
-- **text-only** (no image): a cheap, low-cost LLM (``OPENROUTER_MODEL``) handles
-  the text. This branch stays deliberately lightweight — no image encoding, no
-  multimodal payload, no OCR.
-- **vision** (image present): the image (plus any text context) goes straight to
-  a high-performance multimodal model (``OPENROUTER_VISION_MODEL``). There is no
-  local OCR; the MLLM does the visual reasoning.
+- **text-only** (no image): text completion via ``OPENROUTER_MODEL``. This branch
+  stays deliberately lightweight — no image encoding, no multimodal payload, no
+  OCR.
+- **vision** (image present): the image (plus any text context) goes to
+  ``OPENROUTER_VISION_MODEL``. There is no local OCR; the MLLM does the visual
+  reasoning.
 
 This module is framework-agnostic: it knows nothing about Zulip, the coach bot,
 or any persistence layer. Callers build an :class:`InputData`, choose system

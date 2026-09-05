@@ -7,8 +7,8 @@ Long-running bot that:
 
 Inputs are routed by a cost/accuracy-aware conditional router (`erg_strava/document_router.py`, `process_input`):
 
-- **Text-only** (no image) → low-cost text model (`OPENROUTER_MODEL`, e.g. `anthropic/claude-3.5-haiku`).
-- **Image present** → the screenshot goes straight to a high-performance vision model (`OPENROUTER_VISION_MODEL`, e.g. `google/gemini-2.5-flash`) which reads it directly. There is **no local OCR** (no Tesseract/Pillow); the MLLM does the visual reasoning and returns the same JSON metrics the cache expects.
+- **Text-only** (no image) → OpenRouter Auto Router (`OPENROUTER_MODEL`, default `openrouter/auto`) selects a model for the prompt.
+- **Image present** → the screenshot goes straight to a vision-capable model via the same Auto Router (`OPENROUTER_VISION_MODEL`, default `openrouter/auto`) which reads it directly. There is **no local OCR** (no Tesseract/Pillow); the MLLM does the visual reasoning and returns the same JSON metrics the cache expects.
 - Logs **gym/strength transcripts** from @-mentions or private DMs (LLM intent `gym_session_log` → parse sets/reps/weights → cache under `athlete_{id}/gym_logs/`)
 - Updates **private DM body weight / max HR** (LLM intent `profile_update` → writes `body_weight_kg` / `max_hr_bpm` in `config.yaml`)
 - Queues **@-mention plan-change requests** (e.g. "reduce Thursday volume next week") for the next `strava_erg_hr_plot.py` weekly plan run

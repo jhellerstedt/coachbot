@@ -15,9 +15,10 @@ services:
       ZULIP_STREAM: general
       # ZULIP_TOPIC unset = all topics in the stream; set to e.g. project-640 to restrict
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
-      OPENROUTER_STRUCTURED_MODEL: ${OPENROUTER_STRUCTURED_MODEL:-openai/gpt-4o-mini}
-      OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-google/gemini-2.5-flash}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/auto}
+      OPENROUTER_STRUCTURED_MODEL: ${OPENROUTER_STRUCTURED_MODEL:-openrouter/auto}
+      OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-openrouter/auto}
+      OPENROUTER_COST_TIER: ${OPENROUTER_COST_TIER:-low}
     volumes:
       - ../erg_strava/erg_strava_cache:/data/cache
       - ../zuliprc:/app/zuliprc:ro

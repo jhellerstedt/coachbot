@@ -10,14 +10,17 @@ from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
 import requests
 
-# Model catalog: https://openrouter.ai/models
+# Auto Router: https://openrouter.ai/docs/guides/routing/routers/auto-router
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-# Low-cost text-only model (e.g. meta-llama/llama-3-8b-instruct, openai/gpt-4o-mini).
-DEFAULT_OPENROUTER_MODEL = "anthropic/claude-3.5-haiku"
-# High-performance multimodal model for vision (image) inputs.
-DEFAULT_OPENROUTER_VISION_MODEL = "google/gemini-2.5-flash"
-# Reliable json_schema model for weekly plan structured output.
-DEFAULT_OPENROUTER_STRUCTURED_MODEL = "openai/gpt-4o-mini"
+# OpenRouter selects a model per prompt from live task-spend rankings.
+DEFAULT_OPENROUTER_MODEL = "openrouter/auto"
+DEFAULT_OPENROUTER_VISION_MODEL = "openrouter/auto"
+DEFAULT_OPENROUTER_STRUCTURED_MODEL = "openrouter/auto"
+# Cost band for openrouter/auto: low, medium, high, xhigh, max (default matches
+# the previous cheap pinned models).
+DEFAULT_OPENROUTER_COST_TIER = "low"
+_AUTO_MODELS = {"openrouter/auto": "auto-router", "openrouter/auto-beta": "auto-beta-router"}
+_COST_TIERS = {"low", "medium", "high", "xhigh", "max"}
 DEFAULT_HTTP_REFERER = "https://example.com"
 DEFAULT_APP_TITLE = "rowing-coach-bot"
 
@@ -49,6 +52,19 @@ def openrouter_structured_model() -> str:
         os.environ.get("OPENROUTER_STRUCTURED_MODEL", "").strip()
         or DEFAULT_OPENROUTER_STRUCTURED_MODEL
     )
+
+
+def openrouter_cost_tier() -> str:
+    """Auto Router cost band; invalid values fall back to the default."""
+    raw = os.environ.get("OPENROUTER_COST_TIER", DEFAULT_OPENROUTER_COST_TIER).strip().lower()
+    return raw if raw in _COST_TIERS else DEFAULT_OPENROUTER_COST_TIER
+
+
+def _auto_router_plugin(model: str) -> Optional[Dict[str, Any]]:
+    plugin_id = _AUTO_MODELS.get((model or "").strip())
+    if not plugin_id:
+        return None
+    return {"id": plugin_id, "cost_tier": openrouter_cost_tier()}
 
 
 def is_openrouter_error(text: str) -> bool:
@@ -85,6 +101,7 @@ def _post_chat(
     model: str,
     timeout: int,
     response_format: Optional[Dict[str, Any]] = None,
+    session_id: Optional[str] = None,
 ) -> str:
     """POST a prepared message list to OpenRouter and return text or an error string."""
     headers = {
@@ -94,6 +111,12 @@ def _post_chat(
         "X-Title": os.environ.get("OPENROUTER_APP_TITLE", DEFAULT_APP_TITLE),
     }
     payload: Dict[str, Any] = {"model": model, "messages": messages}
+    plugin = _auto_router_plugin(model)
+    if plugin is not None:
+        payload["plugins"] = [plugin]
+    session = (session_id or "").strip()
+    if session:
+        payload["session_id"] = session
     if response_format is not None:
         payload["response_format"] = response_format
         if response_format.get("type") == "json_schema":
@@ -153,12 +176,14 @@ def call_openrouter(
     model: Optional[str] = None,
     timeout: int = 60,
     response_format: Optional[Dict[str, Any]] = None,
+    session_id: Optional[str] = None,
 ) -> str:
     """
     POST a text-only completion to https://openrouter.ai/api/v1/chat/completions
 
-    Default model: anthropic/claude-3.5-haiku — change via OPENROUTER_MODEL or
-    pick another at https://openrouter.ai/models
+    Default model: openrouter/auto — OpenRouter picks a model for the prompt.
+    Pin a specific slug via OPENROUTER_MODEL, or change the cost band with
+    OPENROUTER_COST_TIER.
     """
     model = model or openrouter_model()
     messages: List[Dict[str, Any]] = [{"role": "system", "content": system.strip()}]
@@ -175,6 +200,7 @@ def call_openrouter(
         model=model,
         timeout=timeout,
         response_format=response_format,
+        session_id=session_id,
     )
 
 
@@ -186,6 +212,7 @@ def call_openrouter_vision(
     api_key: str,
     model: Optional[str] = None,
     timeout: int = 120,
+    session_id: Optional[str] = None,
 ) -> str:
     """
     POST a multimodal (text + image) completion to OpenRouter.
@@ -194,8 +221,8 @@ def call_openrouter_vision(
     must be either a base64 ``data:`` URI (see :func:`image_to_data_uri`) or a
     publicly reachable https URL.
 
-    Default model: the high-performance vision model from OPENROUTER_VISION_MODEL
-    (e.g. google/gemini-flash-1.5, anthropic/claude-3.5-sonnet).
+    Default model: openrouter/auto (vision-capable models are selected when the
+    prompt includes images). Pin via OPENROUTER_VISION_MODEL.
     """
     model = model or openrouter_vision_model()
     content: List[Dict[str, Any]] = [{"type": "text", "text": user.strip()}]
@@ -208,5 +235,9 @@ def call_openrouter_vision(
         {"role": "user", "content": content},
     ]
     return _post_chat(
-        messages=messages, api_key=api_key, model=model, timeout=timeout
+        messages=messages,
+        api_key=api_key,
+        model=model,
+        timeout=timeout,
+        session_id=session_id,
     )
