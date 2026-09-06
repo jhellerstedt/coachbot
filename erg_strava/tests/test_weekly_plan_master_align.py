@@ -317,6 +317,37 @@ def test_correct_deload_plan_passes_regression_checklist():
                 assert len(ex.sets) == 2, ex.name
 
 
+def _gym_set_weights(plan, weekday: str, exercise: str) -> list[float]:
+    day = next(d for d in plan.days if d.weekday == weekday)
+    assert day.gym is not None
+    ex = next(e for e in day.gym.exercises if e.name == exercise)
+    return [float(s.weight_kg) for s in ex.sets if s.weight_kg is not None]
+
+
+def test_locked_athlete_plan_does_not_deload_gym_a_second_time():
+    squad_plan, _ = correct_weekly_plan(
+        "2026-06-29", misaligned_deload_plan_dict(), deload_targets()
+    )
+    squad_json = weekly_plan_to_dict(squad_plan)
+    squad_squat = _gym_set_weights(squad_plan, "Monday", "Back squat")
+    assert squad_squat
+    assert all(len(ex.sets) == 2 for d in squad_plan.days if d.gym for ex in d.gym.exercises)
+
+    athlete_json = weekly_plan_to_dict(squad_plan)
+    athlete_json["personalised"] = True
+    athlete_plan, _ = correct_weekly_plan(
+        "2026-06-29",
+        athlete_json,
+        deload_targets(),
+        reference_plan=squad_json,
+    )
+
+    assert _gym_set_weights(athlete_plan, "Monday", "Back squat") == squad_squat
+    assert all(
+        len(ex.sets) == 2 for d in athlete_plan.days if d.gym for ex in d.gym.exercises
+    )
+
+
 def _z2_steady_erg_day(weekday: str, day_date: str) -> dict:
     z2_seg = {
         "phase": "main_set",

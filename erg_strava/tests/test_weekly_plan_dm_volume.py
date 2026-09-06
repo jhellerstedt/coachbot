@@ -74,3 +74,22 @@ def test_compose_weekly_athlete_plan_dm_prepends_volume():
     assert "**Your weekly plan** (2026-06-29 – 2026-07-05)" in msg
     assert msg.index("**Last week volume**") < msg.index("**Your weekly plan**")
     assert "Monday: rest" in msg
+
+
+def test_compose_weekly_athlete_plan_dm_includes_week_context():
+    target = week_bounds_from_monday(date(2026, 9, 7))
+    msg = compose_weekly_athlete_plan_dm(
+        "",
+        target,
+        "Monday: gym\n",
+        week_context=(
+            "This is week 14. Recovery week before HOTY race prep starts 14 Sep."
+        ),
+    )
+    assert "**Your weekly plan** (2026-09-07 – 2026-09-13)" in msg
+    assert (
+        "This is week 14. Recovery week before HOTY race prep starts 14 Sep."
+        in msg
+    )
+    assert msg.index("**Your weekly plan**") < msg.index("This is week 14.")
+    assert msg.index("This is week 14.") < msg.index("Monday: gym")

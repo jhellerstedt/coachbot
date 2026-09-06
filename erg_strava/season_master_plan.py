@@ -1175,6 +1175,154 @@ def format_season_week_macro_context(
     return "\n".join(lines)
 
 
+_RECOVERY_PLAN_PHASES = frozenset({"deload", "recovery", "taper"})
+
+
+def season_week_number(season_start: date, week_start: date) -> int:
+    """1-indexed season week from the Monday on or before season start."""
+    start_monday = _monday_on_or_before(season_start)
+    week_monday = _monday_on_or_before(week_start)
+    return ((week_monday - start_monday).days // 7) + 1
+
+
+def _format_blurb_day(value: date) -> str:
+    return f"{value.day} {value.strftime('%b')}"
+
+
+def _capitalize_sentence(text: str) -> str:
+    if not text:
+        return text
+    return text[0].upper() + text[1:]
+
+
+def _upcoming_race(
+    races: Sequence[Mapping[str, Any]], week_start: date
+) -> Optional[Mapping[str, Any]]:
+    upcoming: List[Tuple[date, Mapping[str, Any]]] = []
+    for race in races:
+        race_date = _parse_iso_date(race.get("date"))
+        if race_date is None:
+            continue
+        upcoming.append((race_date, race))
+    upcoming.sort(key=lambda item: item[0])
+    for race_date, race in upcoming:
+        if race_date >= week_start:
+            return race
+    return None
+
+
+def _phase_blurb_noun(
+    phase: str,
+    *,
+    races: Sequence[Mapping[str, Any]] = (),
+    week_start: Optional[date] = None,
+) -> str:
+    key = (phase or "").strip().lower()
+    if key in _RECOVERY_PLAN_PHASES:
+        return "recovery week"
+    if key == "base":
+        return "base week"
+    if key == "build":
+        return "build week"
+    if key in {"raceprep", "peak", "race"}:
+        race = _upcoming_race(races, week_start or date.min)
+        name = str((race or {}).get("name") or "")
+        if "yarra" in name.lower():
+            return "HOTY race prep"
+        if name:
+            return f"{name} race prep"
+        return "race prep"
+    if key:
+        return f"{key} week"
+    return ""
+
+
+def _week_row_start(week_id: str, row: Mapping[str, Any]) -> Optional[date]:
+    return _parse_iso_date(row.get("week_start") or week_id[:10])
+
+
+def _next_distinct_phase(
+    weeks: Mapping[str, Any],
+    current_start: date,
+    current_phase: str,
+) -> Optional[Tuple[date, str]]:
+    current_key = (current_phase or "").strip().lower()
+    ordered: List[Tuple[date, str]] = []
+    for week_id, row in weeks.items():
+        if not isinstance(row, Mapping):
+            continue
+        start = _week_row_start(str(week_id), row)
+        if start is None:
+            continue
+        phase = str(row.get("phase") or "").strip().lower()
+        if start > current_start and phase:
+            ordered.append((start, phase))
+    ordered.sort(key=lambda item: item[0])
+    for start, phase in ordered:
+        if phase != current_key:
+            return start, phase
+    return None
+
+
+def format_weekly_plan_week_blurb(
+    week: WeekBounds,
+    *,
+    season_start: date,
+    weeks: Mapping[str, Any],
+    races: Sequence[Mapping[str, Any]] = (),
+) -> str:
+    """Athlete-facing one-liner: season week number plus what this week is for."""
+    number = season_week_number(season_start, week.week_start)
+    row: Optional[Mapping[str, Any]] = None
+    if week.week_id in weeks:
+        candidate = weeks[week.week_id]
+        if isinstance(candidate, Mapping):
+            row = candidate
+    if row is None:
+        for week_id, candidate in weeks.items():
+            if not isinstance(candidate, Mapping):
+                continue
+            start = _week_row_start(str(week_id), candidate)
+            if start == week.week_start:
+                row = candidate
+                break
+    phase = str((row or {}).get("phase") or "").strip()
+    first = f"This is week {number}."
+    noun = _phase_blurb_noun(
+        phase, races=races, week_start=week.week_start
+    )
+    if not noun:
+        return first
+    nxt = _next_distinct_phase(weeks, week.week_start, phase)
+    if nxt:
+        nxt_start, nxt_phase = nxt
+        nxt_noun = _phase_blurb_noun(
+            nxt_phase, races=races, week_start=nxt_start
+        )
+        second = f"{noun} before {nxt_noun} starts {_format_blurb_day(nxt_start)}."
+    else:
+        second = f"{noun}."
+    return f"{first} {_capitalize_sentence(second)}"
+
+
+def load_weekly_plan_week_blurb(
+    cache_dir: Path,
+    week: WeekBounds,
+    config: SeasonConfig,
+) -> Optional[str]:
+    """Build the public/DM week blurb from the merged season master plan."""
+    data = load_season_plan_merged(cache_dir, config)
+    start = _parse_iso_date(data.get("season_start"))
+    if start is None:
+        start, _ = season_bounds(config)
+    return format_weekly_plan_week_blurb(
+        week,
+        season_start=start,
+        weeks=data.get("weeks") or {},
+        races=data.get("races") or (),
+    )
+
+
 def load_season_week_macro_context(
     cache_dir: Path,
     week: WeekBounds,

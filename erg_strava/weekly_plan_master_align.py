@@ -1275,21 +1275,27 @@ def correct_weekly_plan(
         gym = day.gym
         rowing = day.rowing
         if gym and phase == "deload":
-            ref_gym = (
-                gym_for_weekday(prev_parsed, day.weekday)
-                if prev_parsed is not None
-                else None
-            )
-            session_target = (
-                gym_day_budget
-                if gym_day_budget is not None
-                else (target.tgt_gym_kg or 3000) / 2.0
-            )
-            gym, _adj_notes, _check = apply_deload_gym_session(
-                gym,
-                reference_gym=ref_gym,
-                session_tonnage_target=session_target,
-            )
+            already_deload_sets = all(len(ex.sets) <= 2 for ex in gym.exercises)
+            if ref_parsed is not None and already_deload_sets:
+                # Locked athlete plans clone the already-deloaded squad gym.
+                # Applying the modifier again would cut loads a second time.
+                pass
+            else:
+                ref_gym = (
+                    gym_for_weekday(prev_parsed, day.weekday)
+                    if prev_parsed is not None
+                    else None
+                )
+                session_target = (
+                    gym_day_budget
+                    if gym_day_budget is not None
+                    else (target.tgt_gym_kg or 3000) / 2.0
+                )
+                gym, _adj_notes, _check = apply_deload_gym_session(
+                    gym,
+                    reference_gym=ref_gym,
+                    session_tonnage_target=session_target,
+                )
         elif gym and phase in ("base", "build"):
             gym = _ensure_gym_working_sets(gym, phase)
         if (

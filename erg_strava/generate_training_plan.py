@@ -384,6 +384,7 @@ class WeeklyPlanRecord:
     adherence_review: Optional[str] = None
     goal_tracking: Optional[str] = None
     gym_tonnage_summary: Optional[str] = None
+    week_context: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
@@ -397,6 +398,7 @@ class WeeklyPlanRecord:
             "adherence_review": self.adherence_review,
             "goal_tracking": self.goal_tracking,
             "gym_tonnage_summary": self.gym_tonnage_summary,
+            "week_context": self.week_context,
         }
         if self.plan_json is not None:
             out["plan_json"] = self.plan_json
@@ -417,6 +419,7 @@ class WeeklyPlanRecord:
             adherence_review=data.get("adherence_review"),
             goal_tracking=data.get("goal_tracking"),
             gym_tonnage_summary=data.get("gym_tonnage_summary"),
+            week_context=data.get("week_context"),
         )
 
 
@@ -6747,10 +6750,17 @@ def compose_weekly_athlete_plan_dm(
     volume_block: str,
     target_week: WeekBounds,
     plan_body: str,
+    *,
+    week_context: Optional[str] = None,
 ) -> str:
     """Assemble weekly athlete DM: optional last-week volume, then next-week plan."""
     header = (
         f"**Your weekly plan** ({target_week.week_start} – {target_week.week_end})\n"
+    )
+    context = (week_context or "").strip()
+    if context:
+        header += context + "\n"
+    header += (
         "_Personalised session targets — squad averages are in the public topic._\n\n"
     )
     plan_section = header + plan_body.strip()
@@ -6778,6 +6788,7 @@ def send_weekly_athlete_plan_dms(
     zuliprc_path: Optional[Path] = None,
     season_week_context: Optional[str] = None,
     season_cfg_obj: Any = None,
+    week_context: Optional[str] = None,
 ) -> int:
     """DM each athlete with logged sessions their personalised weekly plan."""
     if not squad_plan_text.strip() or not athletes:
@@ -6942,7 +6953,10 @@ def send_weekly_athlete_plan_dms(
                 cache_dir, athlete.id, review_week
             )
             dm_body = compose_weekly_athlete_plan_dm(
-                volume_block, target_week, plan_body
+                volume_block,
+                target_week,
+                plan_body,
+                week_context=week_context,
             )
             send_private_message_to_zulip(
                 dm_body,
@@ -7178,8 +7192,11 @@ def format_public_weekly_plan_post(record: WeeklyPlanRecord) -> str:
             "=== Previous week adherence ===\n\n" + record.adherence_review.strip()
         )
     plan_body = finalize_plan_text_for_display(record.plan_text, record.plan_json)
+    context = (record.week_context or "").strip()
+    context_block = f"{context}\n\n" if context else ""
     parts.append(
         f"=== Squad weekly plan ({record.week_start} – {record.week_end}) ===\n"
+        f"{context_block}"
         "_Squad-average session targets — athletes with logged sessions receive "
         "personalised targets by DM._\n\n"
         + plan_body
@@ -7358,6 +7375,7 @@ def run_weekly_training_pipeline(
         )
 
     season_week_context: Optional[str] = None
+    week_context: Optional[str] = None
     season_cfg_obj: Any = None
     if season_config is not None:
         try:
@@ -7365,6 +7383,7 @@ def run_weekly_training_pipeline(
                 ensure_macro_season_plan,
                 load_season_config,
                 load_season_week_macro_context,
+                load_weekly_plan_week_blurb,
             )
 
             season_cfg_obj = (
@@ -7395,6 +7414,9 @@ def run_weekly_training_pipeline(
                     f"{target_week.week_start.isoformat()}.",
                     flush=True,
                 )
+            week_context = load_weekly_plan_week_blurb(
+                cache_dir, target_week, season_cfg_obj
+            )
         except Exception as exc:
             print(f"Season master plan macro load skipped: {exc}", flush=True)
 
@@ -7551,6 +7573,7 @@ def run_weekly_training_pipeline(
         adherence_review=adherence_review,
         goal_tracking=goal_tracking,
         gym_tonnage_summary=gym_tonnage_summary,
+        week_context=week_context,
     )
     if record.plan_json is not None:
         save_weekly_plan(cache_dir, record)
@@ -7638,6 +7661,7 @@ def run_weekly_training_pipeline(
             zuliprc_path=zuliprc_path,
             season_week_context=season_week_context,
             season_cfg_obj=season_cfg_obj,
+            week_context=week_context,
         )
 
     report_parts = []
@@ -7647,10 +7671,14 @@ def run_weekly_training_pipeline(
         )
     if gym_tonnage_summary:
         report_parts.append("=== Gym tonnage ===\n\n" + gym_tonnage_summary.strip())
-    report_parts.append(
-        f"=== Squad weekly plan ({target_week.week_start} – {target_week.week_end}) ===\n\n"
-        + plan_text.strip()
+    plan_header = (
+        f"=== Squad weekly plan ({target_week.week_start} – {target_week.week_end}) ===\n"
     )
+    if week_context:
+        plan_header += week_context.strip() + "\n\n"
+    else:
+        plan_header += "\n"
+    report_parts.append(plan_header + plan_text.strip())
     if intensity_cap_report:
         report_parts.append(
             "=== Intensity cap check ===\n\n" + intensity_cap_report.strip()

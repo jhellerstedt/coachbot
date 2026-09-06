@@ -58,6 +58,31 @@ def test_format_public_weekly_plan_post_omits_goal_tracking_section():
     assert "=== Squad weekly plan (2026-07-20 – 2026-07-26) ===" in post
 
 
+def test_format_public_weekly_plan_post_includes_week_context():
+    record = WeeklyPlanRecord(
+        week_id="2026-09-07_2026-09-13",
+        week_start="2026-09-07",
+        week_end="2026-09-13",
+        plan_text="Monday:\ngym",
+        plan_json=None,
+        generated_at="2026-09-06T00:00:00+00:00",
+        training_summary="summary",
+        include_lifting=True,
+        week_context="This is week 14. Recovery week before HOTY race prep starts 14 Sep.",
+    )
+
+    post = format_public_weekly_plan_post(record)
+
+    header = "=== Squad weekly plan (2026-09-07 – 2026-09-13) ==="
+    assert header in post
+    assert (
+        "This is week 14. Recovery week before HOTY race prep starts 14 Sep."
+        in post
+    )
+    assert post.index(header) < post.index("This is week 14.")
+    assert post.index("This is week 14.") < post.index("_Squad-average")
+
+
 def test_ensure_realistic_interval_sessions_repairs_flat_tuesday(monkeypatch):
     data = sample_squad_plan_dict()
     tuesday = data["days"][1]
