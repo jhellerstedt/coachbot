@@ -625,6 +625,17 @@ def test_enforce_session_cap_trims_oversized_steady_state():
     assert estimate_rowing_session_minutes(thu_after.rowing) <= 45
 
 
+def test_correct_weekly_plan_does_not_duplicate_session_cap_notes():
+    data = _base_week_plan()
+    thu = next(d for d in data["days"] if d["weekday"] == "Thursday")
+    thu["rowing"]["segments"][1]["duration"] = "35 min"
+    corrected, _ = correct_weekly_plan("2026-07-06", data, base_targets())
+    for day in corrected.days:
+        if not day.notes:
+            continue
+        assert day.notes.count("[trimmed to session cap]") <= 1
+
+
 def test_enforce_session_cap_keeps_recommended_erg():
     from weekly_plan_master_align import _enforce_session_duration_caps
     from test_weekly_plan_schema import _recommended_erg_dict, sample_squad_plan_dict

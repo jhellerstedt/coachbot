@@ -43,6 +43,65 @@ from weekly_plan_schema import (
     weekly_plan_to_dict,
 )
 
+SESSION_CAP_TRIM_NOTE = "[trimmed to session cap]"
+
+
+def _append_session_cap_trim_note(notes: Optional[str]) -> str:
+    """Record a cap trim once per day (alignment may enforce caps more than once)."""
+    text = (notes or "").strip()
+    if SESSION_CAP_TRIM_NOTE in text:
+        return text
+    return f"{text} {SESSION_CAP_TRIM_NOTE}".strip() if text else SESSION_CAP_TRIM_NOTE
+
+
+def _shrink_rowing_warmup_cooldown_for_cap(
+    rowing: RowingSession,
+    *,
+    cap: int,
+) -> RowingSession:
+    """Shorten warm-up/cool-down toward floor when main-set trim still exceeds ``cap``."""
+
+    def shrink_segments(segments: Sequence[RowingSegment]) -> List[RowingSegment]:
+        segs = list(segments)
+        probe = RowingSession(segments=segs, erg_alternative=None)
+        while estimate_rowing_session_minutes(probe) > cap:
+            reduced = False
+            for idx, seg in enumerate(segs):
+                if seg.phase not in ("warm_up", "cool_down"):
+                    continue
+                mins = _segment_minutes(seg)
+                if mins <= WARMUP_COOLDOWN_FLOOR_MINUTES:
+                    continue
+                new_min = mins - 1
+                segs[idx] = RowingSegment(
+                    phase=seg.phase,
+                    label=seg.label,
+                    duration=f"{new_min} min",
+                    split_min=seg.split_min,
+                    split_max=seg.split_max,
+                    zone_z=seg.zone_z,
+                    zone_t=seg.zone_t,
+                    hr_bpm_min=seg.hr_bpm_min,
+                    hr_bpm_max=seg.hr_bpm_max,
+                    priority=seg.priority,
+                    notes=seg.notes,
+                )
+                reduced = True
+                break
+            if not reduced:
+                break
+            probe = RowingSession(segments=segs, erg_alternative=None)
+        return segs
+
+    segments = shrink_segments(rowing.segments)
+    alt = rowing.erg_alternative
+    if alt is not None:
+        alt = ErgAlternative(
+            description=alt.description,
+            segments=shrink_segments(alt.segments),
+        )
+    return RowingSession(segments=segments, erg_alternative=alt)
+
 DEFAULT_MAX_HR = 183
 T3_HR_CAP = int(DEFAULT_MAX_HR * 0.80)  # ≤80% MHR
 
@@ -799,8 +858,12 @@ def _enforce_session_duration_caps(
         trimmed, overflow = _trim_rowing_session_to_cap(
             day.rowing, cap=SESSION_CAP_MINUTES
         )
+        if estimate_rowing_session_minutes(trimmed) > SESSION_CAP_MINUTES:
+            trimmed = _shrink_rowing_warmup_cooldown_for_cap(
+                trimmed, cap=SESSION_CAP_MINUTES
+            )
         spill_total += overflow
-        note = (day.notes or "") + " [trimmed to session cap]"
+        note = _append_session_cap_trim_note(day.notes)
         days[idx] = DayPlan(
             weekday=day.weekday,
             date=day.date,
