@@ -39,7 +39,7 @@ from generate_training_plan import (
     week_for_date,
     _parse_erg_score_session_date,
     find_erg_score_by_zulip_message,
-    infer_makeup_prescribed_date,
+    resolve_makeup_prescribed_date,
 )
 from erg_prescription_compare import (
     format_erg_session_comparison,
@@ -630,8 +630,14 @@ class CoachMessageHandler:
             detail = download_errors[0] if download_errors else "Could not download image."
             return f"Could not read erg score from screenshot: {detail}"
         logged_date = ref.date()
+        topic_context = self._topic_context(message)
         prescribed_date = (
-            infer_makeup_prescribed_date(session_body, logged_date) or logged_date
+            resolve_makeup_prescribed_date(
+                logged_date,
+                athlete_message=session_body,
+                topic_context=topic_context or None,
+            )
+            or logged_date
         )
         prescribed_session_text = prescribed_erg_section_for_log(
             self.cache_dir, athlete.id, prescribed_date
@@ -762,6 +768,14 @@ class CoachMessageHandler:
         session_date = _parse_erg_score_session_date(pending) or ref.date()
         plan_record = plan_for_date(self.cache_dir, session_date)
         topic_context = self._topic_context(message)
+        prescribed_date = (
+            resolve_makeup_prescribed_date(
+                session_date,
+                athlete_message=body,
+                topic_context=topic_context or None,
+            )
+            or session_date
+        )
         try:
             coaching = answer_erg_score_coaching(
                 pending,
@@ -781,7 +795,13 @@ class CoachMessageHandler:
         if score_id:
             mark_erg_score_elaboration_sent(self.cache_dir, athlete.id, score_id)
         prescription_block = format_erg_session_comparison(
-            self.cache_dir, athlete.id, pending, session_date
+            self.cache_dir,
+            athlete.id,
+            pending,
+            session_date,
+            prescribed_session_date=(
+                prescribed_date if prescribed_date != session_date else None
+            ),
         )
         zone_block = format_week_zone_volume_progress(
             self.cache_dir,
@@ -825,8 +845,14 @@ class CoachMessageHandler:
     ) -> str:
         self._react_thumbs_up(message)
         session_date = _parse_erg_score_session_date(record) or ref.date()
+        topic_context = self._topic_context(message)
         prescribed_date = (
-            infer_makeup_prescribed_date(body, session_date) or session_date
+            resolve_makeup_prescribed_date(
+                session_date,
+                athlete_message=body,
+                topic_context=topic_context or None,
+            )
+            or session_date
         )
         plan_record = plan_for_date(self.cache_dir, session_date)
         try:
@@ -838,7 +864,7 @@ class CoachMessageHandler:
                 athlete.label,
                 self.kagi_token,
                 local_datetime=ref,
-                topic_context=None,
+                topic_context=topic_context or None,
                 athlete_message=body or None,
                 brief=True,
             )

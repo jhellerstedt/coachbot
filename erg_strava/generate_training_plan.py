@@ -4463,6 +4463,53 @@ def infer_makeup_prescribed_date(text: str, logged_on: date) -> Optional[date]:
     return _plan_date_for_weekday(logged_on, weekday)
 
 
+_ZULIP_QUOTE_BLOCK_RE = re.compile(r"```quote\s*(.*?)\s*```", re.I | re.S)
+
+
+def _makeup_inference_text_candidates(
+    *parts: Optional[str],
+) -> List[str]:
+    """Text snippets that may say which plan day the athlete made up."""
+    candidates: List[str] = []
+    for part in parts:
+        if not part or not str(part).strip():
+            continue
+        text = str(part).strip()
+        candidates.append(text)
+        for match in _ZULIP_QUOTE_BLOCK_RE.finditer(text):
+            quoted = match.group(1).strip()
+            if quoted:
+                candidates.append(quoted)
+    return candidates
+
+
+def resolve_makeup_prescribed_date(
+    logged_on: date,
+    *,
+    athlete_message: Optional[str] = None,
+    topic_context: Optional[str] = None,
+) -> Optional[date]:
+    """Resolve makeup target day from the log message, quotes, or recent topic context."""
+    for text in _makeup_inference_text_candidates(athlete_message):
+        prescribed = infer_makeup_prescribed_date(text, logged_on)
+        if prescribed is not None:
+            return prescribed
+    context = (topic_context or "").strip()
+    if not context:
+        return None
+    for line in reversed(context.splitlines()):
+        body = line.strip()
+        if not body:
+            continue
+        body = re.sub(r"^\[[^\]]+\]\s[^:]+\:\s*", "", body).strip()
+        if not body:
+            continue
+        prescribed = infer_makeup_prescribed_date(body, logged_on)
+        if prescribed is not None:
+            return prescribed
+    return None
+
+
 def _plan_date_for_weekday(session_date: date, weekday_name: str) -> date:
     week = week_for_date(session_date)
     idx = _WEEKDAY_NAMES.index(weekday_name)
@@ -4485,9 +4532,14 @@ def build_erg_score_coaching_prompt(
     local_datetime = _resolve_coach_local_datetime(local_datetime=local_datetime)
     session_date = _parse_erg_score_session_date(erg_record) or local_datetime.date()
     weekday = _WEEKDAY_NAMES[session_date.weekday()]
-    prescribed_date = infer_makeup_prescribed_date(
-        athlete_message or "", session_date
-    ) or session_date
+    prescribed_date = (
+        resolve_makeup_prescribed_date(
+            session_date,
+            athlete_message=athlete_message,
+            topic_context=topic_context,
+        )
+        or session_date
+    )
     prescribed_weekday = _WEEKDAY_NAMES[prescribed_date.weekday()]
     exclude_id = str(erg_record.get("id") or "")
     history = load_erg_scores_for_athlete(
@@ -4538,17 +4590,17 @@ def build_erg_score_coaching_prompt(
 
     plan_source = "personalised athlete DM plan" if personalised else "squad plan"
     if plan_text or plan_json:
-        prescribed = session_from_plan(plan_text or "", plan_json, session_date)
+        prescribed = session_from_plan(plan_text or "", plan_json, prescribed_date)
         if prescribed:
             day_name, section = prescribed
             blocks.append(
-                f"--- Prescribed session ({day_name} {session_date.isoformat()}, "
+                f"--- Prescribed session ({day_name} {prescribed_date.isoformat()}, "
                 f"{plan_source}) ---\n"
                 f"{section.strip()}"
             )
         elif not brief:
             blocks.append(
-                f"--- Prescribed session ({weekday} {session_date.isoformat()}) ---\n"
+                f"--- Prescribed session ({prescribed_weekday} {prescribed_date.isoformat()}) ---\n"
                 f"(Could not extract this day from {plan_source}; "
                 "use the full weekly plan below.)"
             )
