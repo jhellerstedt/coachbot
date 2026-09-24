@@ -6,54 +6,65 @@ from coach_bot.followup_triage import should_reply_to_followup
 
 
 def test_ack_only_skips_without_llm():
-    calls = {"n": 0}
+    def decide(_state, _questions):
+        raise AssertionError("decisions should not run for acknowledgements")
 
-    def llm_call(_system: str, _user: str) -> str:
-        calls["n"] += 1
-        return '{"should_reply": true}'
-
-    assert should_reply_to_followup("thanks!", llm_call=llm_call) is False
-    assert should_reply_to_followup("ok", llm_call=llm_call) is False
-    assert should_reply_to_followup("yep", llm_call=llm_call) is False
-    assert calls["n"] == 0
+    assert should_reply_to_followup("thanks!", decide=decide) is False
+    assert should_reply_to_followup("ok", decide=decide) is False
+    assert should_reply_to_followup("yep", decide=decide) is False
 
 
 def test_empty_text_skips():
-    assert should_reply_to_followup("  ", llm_call=lambda *_a: '{"should_reply": true}') is False
+    assert (
+        should_reply_to_followup(
+            "  ", decide=lambda *_a: {"should_reply": {"noul": 1}}
+        )
+        is False
+    )
 
 
-def test_llm_should_reply_true():
-    def llm_call(_system: str, _user: str) -> str:
-        return '{"should_reply": true, "reason": "asked a question"}'
+def test_noul_at_threshold_replies():
+    def decide(state, questions):
+        assert state["message"] == "how was that split?"
+        assert "should_reply" in questions
+        assert "why" in questions
+        return {
+            "should_reply": {"type": "noul", "noul": 0.8},
+            "why": {"type": "choice", "choice": "question", "confidence": 0.7},
+        }
 
-    assert should_reply_to_followup("how was that split?", llm_call=llm_call) is True
-
-
-def test_llm_should_reply_false():
-    def llm_call(_system: str, _user: str) -> str:
-        return '{"should_reply": false, "reason": "squad chatter"}'
-
-    assert should_reply_to_followup("erg tomorrow 7am?", llm_call=llm_call) is False
-
-
-def test_malformed_json_skips():
-    def llm_call(_system: str, _user: str) -> str:
-        return "not json"
-
-    assert should_reply_to_followup("how was gym?", llm_call=llm_call) is False
+    assert should_reply_to_followup("how was that split?", decide=decide) is True
 
 
-def test_llm_exception_skips():
-    def llm_call(_system: str, _user: str) -> str:
+def test_noul_below_threshold_skips():
+    def decide(_state, _questions):
+        return {"should_reply": {"type": "noul", "noul": 0.79}}
+
+    assert should_reply_to_followup("erg tomorrow 7am?", decide=decide) is False
+
+
+def test_missing_answers_skips():
+    assert should_reply_to_followup("how was gym?", decide=lambda *_a: None) is False
+
+
+def test_decide_exception_skips():
+    def decide(_state, _questions):
         raise RuntimeError("api down")
 
-    assert should_reply_to_followup("how was gym?", llm_call=llm_call) is False
+    assert should_reply_to_followup("how was gym?", decide=decide) is False
 
 
 def test_use_llm_false_skips():
     assert (
         should_reply_to_followup(
-            "how was gym?", llm_call=lambda *_a: "x", use_llm=False
+            "how was gym?",
+            decide=lambda *_a: {"should_reply": {"noul": 1}},
+            use_llm=False,
         )
         is False
     )
+
+
+def test_missing_key_skips(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert should_reply_to_followup("how was gym?") is False

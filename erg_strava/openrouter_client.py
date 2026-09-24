@@ -12,6 +12,10 @@ import requests
 
 # Auto Router: https://openrouter.ai/docs/guides/routing/routers/auto-router
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Jev is not a chat model. OpenRouter serves it on the Decisions API.
+OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
+DEFAULT_OPENROUTER_JEV_MODEL = "~typesafe/jev-latest"
+_RETRYABLE_STATUS = {404, 408, 429, 500, 502, 503, 504}
 # OpenRouter selects a model per prompt from live task-spend rankings.
 DEFAULT_OPENROUTER_MODEL = "openrouter/auto"
 DEFAULT_OPENROUTER_VISION_MODEL = "openrouter/auto"
@@ -51,6 +55,14 @@ def openrouter_structured_model() -> str:
     return (
         os.environ.get("OPENROUTER_STRUCTURED_MODEL", "").strip()
         or DEFAULT_OPENROUTER_STRUCTURED_MODEL
+    )
+
+
+def openrouter_jev_model() -> str:
+    """System One model for the Decisions API. Tracks the current Jev release."""
+    return (
+        os.environ.get("OPENROUTER_JEV_MODEL", DEFAULT_OPENROUTER_JEV_MODEL).strip()
+        or DEFAULT_OPENROUTER_JEV_MODEL
     )
 
 
@@ -94,6 +106,24 @@ def topic_context_to_history(topic_context: str) -> List[ChatMessage]:
     return history
 
 
+def _openrouter_headers(api_key: str) -> Dict[str, str]:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": os.environ.get("OPENROUTER_HTTP_REFERER", DEFAULT_HTTP_REFERER),
+        "X-Title": os.environ.get("OPENROUTER_APP_TITLE", DEFAULT_APP_TITLE),
+    }
+
+
+def _decision_state(state: Any) -> Dict[str, Any]:
+    """Decisions `state` is a JSON object, not a chat message list."""
+    if isinstance(state, dict):
+        return state
+    if isinstance(state, str):
+        return {"text": state}
+    return {"text": str(state)}
+
+
 def _post_chat(
     *,
     messages: List[Dict[str, Any]],
@@ -104,12 +134,7 @@ def _post_chat(
     session_id: Optional[str] = None,
 ) -> str:
     """POST a prepared message list to OpenRouter and return text or an error string."""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": os.environ.get("OPENROUTER_HTTP_REFERER", DEFAULT_HTTP_REFERER),
-        "X-Title": os.environ.get("OPENROUTER_APP_TITLE", DEFAULT_APP_TITLE),
-    }
+    headers = _openrouter_headers(api_key)
     payload: Dict[str, Any] = {"model": model, "messages": messages}
     plugin = _auto_router_plugin(model)
     if plugin is not None:
@@ -122,7 +147,6 @@ def _post_chat(
         if response_format.get("type") == "json_schema":
             # Only route to providers that support strict json_schema.
             payload["provider"] = {"require_parameters": True}
-    retryable_status = {404, 408, 429, 500, 502, 503, 504}
     try:
         response = None
         for attempt in range(2):
@@ -132,7 +156,7 @@ def _post_chat(
                 json=payload,
                 timeout=timeout,
             )
-            if response.ok or response.status_code not in retryable_status or attempt:
+            if response.ok or response.status_code not in _RETRYABLE_STATUS or attempt:
                 break
             time.sleep(2.0)
         assert response is not None
@@ -165,6 +189,51 @@ def _post_chat(
         return f"OpenRouter API returned unexpected JSON: {body!r}"
     except requests.RequestException as exc:
         return f"OpenRouter API request failed: {exc}"
+
+
+def call_openrouter_decisions(
+    *,
+    state: Any,
+    questions: Dict[str, Any],
+    api_key: str,
+    model: Optional[str] = None,
+    timeout: int = 30,
+) -> Optional[Dict[str, Any]]:
+    """POST state and typed questions to the OpenRouter Decisions API.
+
+    Returns the ``answers`` object, or None when the key is missing or the
+    request fails. Chat completions cannot serve Jev.
+    """
+    if not (api_key or "").strip() or not questions:
+        return None
+    chosen = (model or openrouter_jev_model()).strip() or DEFAULT_OPENROUTER_JEV_MODEL
+    payload = {
+        "model": chosen,
+        "state": _decision_state(state),
+        "questions": questions,
+    }
+    try:
+        response = None
+        for attempt in range(2):
+            response = requests.post(
+                OPENROUTER_DECISIONS_URL,
+                headers=_openrouter_headers(api_key),
+                json=payload,
+                timeout=timeout,
+            )
+            if response.ok or response.status_code not in _RETRYABLE_STATUS or attempt:
+                break
+            time.sleep(2.0)
+        assert response is not None
+        if not response.ok:
+            return None
+        body = response.json()
+        answers = body.get("answers")
+        if isinstance(answers, dict):
+            return answers
+        return None
+    except (requests.RequestException, ValueError, TypeError):
+        return None
 
 
 def call_openrouter(

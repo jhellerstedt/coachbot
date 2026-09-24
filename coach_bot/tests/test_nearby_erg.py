@@ -115,6 +115,10 @@ def test_interpret_downgrades_erg_image_above_from_gym_log(tmp_path, monkeypatch
         )
 
     monkeypatch.setattr("generate_training_plan._call_llm", fake_call)
+    monkeypatch.setattr(
+        "coach_bot.intents.classify_message_intent",
+        lambda *args, **kwargs: "other",
+    )
 
     result = interpret_coach_message_with_kagi(
         "see my erg in the image above",

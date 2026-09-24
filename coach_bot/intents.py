@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
-from typing import Optional
+from typing import Any, Callable, Mapping, Optional
 
 _QUESTION_WORD_RE = re.compile(
     r"(?:^|\b)(?:what|why|how|when|should|can|is|are|do|does)\b",
@@ -52,6 +53,73 @@ def looks_like_question(text: str) -> bool:
 def looks_like_plan_adjustment(text: str) -> bool:
     """True when the athlete is requesting a change to a future weekly plan."""
     return bool(_PLAN_ADJUSTMENT_RE.search(text.strip()))
+
+
+CHOICE_CONFIDENCE_FLOOR = 0.6
+
+INTENT_QUESTIONS: dict[str, dict[str, Any]] = {
+    "intent": {
+        "type": "choice",
+        "instructions": "What is this athlete message asking for?",
+        "criteria": {
+            "question": "A question for the coach.",
+            "plan_adjustment": "A request to change a future weekly plan, even without the words plan, reduce, or next week.",
+            "other": "A log, acknowledgement, or squad chatter.",
+        },
+    }
+}
+
+DecideFn = Callable[[Mapping[str, Any], Mapping[str, Any]], Optional[Mapping[str, Any]]]
+
+
+def classify_message_intent(
+    text: str,
+    *,
+    api_key: Optional[str] = None,
+    decide: Optional[DecideFn] = None,
+) -> str:
+    """Return question, plan_adjustment, or other.
+
+    Regex is the certain path. Jev runs only when neither pattern matches.
+    """
+    body = (text or "").strip()
+    if looks_like_plan_adjustment(body):
+        return "plan_adjustment"
+    if looks_like_question(body):
+        return "question"
+    key = (api_key or os.environ.get("OPENROUTER_API_KEY") or "").strip()
+    if decide is None:
+        if not key:
+            return "other"
+
+        def decide(state: Mapping[str, Any], questions: Mapping[str, Any]):
+            from openrouter_client import call_openrouter_decisions
+
+            return call_openrouter_decisions(
+                state=dict(state),
+                questions=dict(questions),
+                api_key=key,
+            )
+
+    try:
+        answers = decide({"message": body}, INTENT_QUESTIONS)
+    except Exception:
+        return "other"
+    if not isinstance(answers, Mapping):
+        return "other"
+    raw = answers.get("intent")
+    if not isinstance(raw, Mapping):
+        return "other"
+    choice = raw.get("choice")
+    if choice not in ("question", "plan_adjustment", "other"):
+        return "other"
+    try:
+        confidence = float(raw.get("confidence"))
+    except (TypeError, ValueError):
+        return "other"
+    if confidence < CHOICE_CONFIDENCE_FLOOR:
+        return "other"
+    return str(choice)
 
 
 def truncate_for_zulip(text: str, limit: int = 9500) -> str:

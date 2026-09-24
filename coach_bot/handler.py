@@ -277,17 +277,7 @@ class CoachMessageHandler:
         token = self.kagi_token
         if not token:
             return should_reply_to_followup(body, use_llm=False)
-        try:
-            from openrouter_client import call_openrouter
-        except ImportError:
-            return False
-
-        def llm_call(system: str, user: str) -> str:
-            return call_openrouter(
-                system=system, user=user, api_key=token, timeout=30
-            )
-
-        return should_reply_to_followup(body, llm_call=llm_call)
+        return should_reply_to_followup(body, api_key=token)
 
     def handle_reaction(self, event: Dict[str, Any]) -> Optional[str]:
         """Undo an erg or gym log when the athlete thumbs-downs the coach confirmation."""

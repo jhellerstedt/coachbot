@@ -238,6 +238,7 @@ def test_parse_gym_session_with_llm_harness_uses_structured_call(monkeypatch):
         return json.dumps(_JACK_MONDAY_HARNESS_JSON)
 
     monkeypatch.setattr("generate_training_plan._call_llm", fake_call_llm)
+    monkeypatch.setattr("jev_harness.gym_harness_violation", lambda *args, **kwargs: None)
 
     metrics = parse_gym_session_with_llm_harness(
         0, "Gym (Zulip DM)", _JACK_MONDAY_LOG, "test-token"
@@ -246,6 +247,23 @@ def test_parse_gym_session_with_llm_harness_uses_structured_call(monkeypatch):
     assert captured["response_format"]["type"] == "json_schema"
     assert metrics is not None
     assert finalize_gym_session_metrics(metrics).total_tonnage_kg == 5580
+
+
+def test_gym_harness_rejects_invented_weight(monkeypatch):
+    monkeypatch.setattr(
+        "generate_training_plan._call_llm",
+        lambda *args, **kwargs: json.dumps(_JACK_MONDAY_HARNESS_JSON),
+    )
+    monkeypatch.setattr(
+        "jev_harness.gym_harness_violation",
+        lambda *args, **kwargs: "A weight or rep count in the parsed log was invented",
+    )
+    errors: list[str] = []
+    metrics = parse_gym_session_with_llm_harness(
+        0, "Gym (Zulip DM)", _JACK_MONDAY_LOG, "test-token", parse_errors=errors
+    )
+    assert metrics is None
+    assert errors and "invented" in errors[0]
 
 
 def test_coach_transcript_fallback_when_llm_fails(monkeypatch):
@@ -306,6 +324,7 @@ def test_parse_gym_session_metrics_reconciles_hallucinated_llm(monkeypatch):
         "generate_training_plan._call_llm",
         lambda *args, **kwargs: json.dumps(_JACK_TODAY_HALLUCINATED_LLM),
     )
+    monkeypatch.setattr("jev_harness.gym_harness_violation", lambda *args, **kwargs: None)
     metrics = parse_gym_session_metrics(
         0, "Gym (Zulip DM)", _JACK_TODAY_LOG, "test-token"
     )
@@ -339,6 +358,7 @@ def test_parse_gym_session_metrics_reconciles_incomplete_llm(monkeypatch):
         "generate_training_plan._call_llm",
         lambda *args, **kwargs: json.dumps(_JACK_WEDNESDAY_INCOMPLETE_LLM),
     )
+    monkeypatch.setattr("jev_harness.gym_harness_violation", lambda *args, **kwargs: None)
     metrics = parse_gym_session_metrics(
         0, "Gym (Zulip DM)", _JACK_WEDNESDAY_LOG, "test-token"
     )

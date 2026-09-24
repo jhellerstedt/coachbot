@@ -1377,6 +1377,14 @@ def interpret_coach_message_with_kagi(
         subject_athlete_id=subject_athlete_id,
         private_dm=private_dm,
     )
+    from coach_bot.intents import classify_message_intent
+
+    if classify_message_intent(athlete_message, api_key=token) == "plan_adjustment":
+        user += (
+            "\n\nDecision check: this message asks to change a future plan. "
+            "Set intent to plan_adjustment and write pending_adjustment, unless "
+            "the message is a completed workout log."
+        )
     raw = _call_llm(system, user, token, history=history).strip()
     if raw.startswith("OpenRouter API"):
         return CoachInterpretation(intent="coaching_reply", reply=raw)
@@ -2066,6 +2074,14 @@ def parse_gym_session_with_llm_harness(
             parse_errors.append(raw.strip())
         return None
     data = parse_gym_session_harness_json(raw)
+    if data is not None:
+        from jev_harness import gym_harness_violation
+
+        violation = gym_harness_violation(description.strip(), data, token)
+        if violation:
+            if parse_errors is not None:
+                parse_errors.append(violation)
+            return None
     if data is None:
         if parse_errors is not None:
             snippet = raw.strip().replace("\n", " ")[:240]
@@ -5529,6 +5545,12 @@ def _generate_structured_plan_with_fallback(
     prose_fallback: Callable[[], str],
     timeout: int = 120,
 ) -> GeneratedWeeklyPlan:
+    from jev_harness import (
+        apply_plan_locks,
+        format_plan_lock_prompt,
+        predecide_weekly_plan,
+        verify_weekly_plan,
+    )
     from weekly_plan_harness import (
         MAX_STRUCTURED_ATTEMPTS,
         SCHEDULE_RETRY_HINT,
@@ -5539,12 +5561,55 @@ def _generate_structured_plan_with_fallback(
         import_prose_plan_json,
     )
 
+    locks = predecide_weekly_plan(
+        {
+            "phase": phase or "",
+            "personalised": squad_plan_json is not None or personalised,
+            "greeting": greeting,
+            "context": user,
+        },
+        api_key,
+    )
+    lock_prompt = format_plan_lock_prompt(locks)
+
+    def _gate_plan(
+        candidate: Dict[str, Any],
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        current = candidate
+        if locks is not None and locks.any():
+            current, lock_err = apply_plan_locks(current, locks)
+            if lock_err:
+                return None, lock_err
+            parsed_locked = parse_weekly_plan(current)
+            if parsed_locked is not None:
+                locked_err = _validate_parsed_weekly_plan(
+                    parsed_locked,
+                    include_lifting=include_lifting,
+                    squad_plan_json=squad_plan_json,
+                    goal_tracking=goal_tracking if squad_plan_json is None else None,
+                    phase=phase,
+                    athlete_profile=athlete_profile,
+                )
+                if locked_err:
+                    return None, locked_err
+        violation = verify_weekly_plan(
+            current,
+            locks,
+            api_key,
+            personalised=squad_plan_json is not None or personalised,
+            greeting=greeting,
+        )
+        if violation:
+            return None, violation
+        return current, None
+
     structured_system = (
         system.strip()
         + _STRUCTURED_PLAN_JSON_RULES
         + STRUCTURED_JSON_SKELETON
         + f"\n{SCHEDULE_RETRY_HINT}\n"
         + "\nIgnore any earlier instruction to return prose; output JSON only."
+        + lock_prompt
     )
     is_athlete = squad_plan_json is not None or personalised
     if is_athlete:
@@ -5614,9 +5679,21 @@ def _generate_structured_plan_with_fallback(
             if validation_err:
                 retry_feedback = build_validation_retry_feedback(validation_err)
                 continue
+            gated, gate_err = _gate_plan(plan_dict)
+            if gate_err or gated is None:
+                retry_feedback = build_validation_retry_feedback(
+                    gate_err or "locked decisions rejected the plan"
+                )
+                continue
+            gated_parsed = parse_weekly_plan(gated)
+            if gated_parsed is None:
+                retry_feedback = build_retry_feedback(
+                    "locked decisions produced unparseable plan JSON"
+                )
+                continue
             return GeneratedWeeklyPlan(
-                plan_json=plan_dict,
-                plan_text=render_plan_text(parsed),
+                plan_json=gated,
+                plan_text=render_plan_text(gated_parsed),
             )
     plan_text = sanitize_plan_prose(prose_fallback())
     if is_openrouter_error(plan_text):
@@ -5661,16 +5738,23 @@ def _generate_structured_plan_with_fallback(
                 athlete_profile=athlete_profile,
             )
         if finalized is not None:
-            parsed = parse_weekly_plan(finalized)
-            if parsed is not None:
+            gated, gate_err = _gate_plan(finalized)
+            if gate_err or gated is None:
                 print(
-                    "Structured plan: recovered JSON from prose fallback via import.",
+                    f"Prose import failed decision check: {gate_err}",
                     flush=True,
                 )
-                return GeneratedWeeklyPlan(
-                    plan_json=finalized,
-                    plan_text=render_plan_text(parsed),
-                )
+            else:
+                parsed = parse_weekly_plan(gated)
+                if parsed is not None:
+                    print(
+                        "Structured plan: recovered JSON from prose fallback via import.",
+                        flush=True,
+                    )
+                    return GeneratedWeeklyPlan(
+                        plan_json=gated,
+                        plan_text=render_plan_text(parsed),
+                    )
         if import_err:
             print(f"Prose import failed validation: {import_err}", flush=True)
 
