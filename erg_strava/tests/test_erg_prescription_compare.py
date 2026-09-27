@@ -17,6 +17,7 @@ from erg_prescription_compare import (
 )
 from generate_training_plan import (
     infer_makeup_prescribed_date,
+    resolve_makeup_prescribed_date,
     save_athlete_weekly_plan,
     week_bounds_from_monday,
 )
@@ -208,6 +209,28 @@ def test_infer_makeup_prescribed_date():
     assert infer_makeup_prescribed_date("makeup Tuesday erg", logged) == date(2026, 8, 25)
     assert infer_makeup_prescribed_date("Tuesday erg this morning", logged) is None
     assert infer_makeup_prescribed_date("made up erg this morning", logged) is None
+
+
+def test_resolve_makeup_from_zulip_quote_and_topic_context():
+    logged = date(2026, 8, 27)
+    quoted = (
+        "@**coach**\n"
+        "```quote\n"
+        "Jack H (2026-08-27 08:00 UTC)\n"
+        "Makeup for Tuesday erg this morning\n"
+        "```\n"
+        "compare to plan"
+    )
+    assert resolve_makeup_prescribed_date(
+        logged, athlete_message=quoted
+    ) == date(2026, 8, 25)
+    topic = (
+        "[2026-08-27 07:55 UTC] Jack H: warmup done\n"
+        "[2026-08-27 08:00 UTC] Jack H: makeup Tuesday erg session"
+    )
+    assert resolve_makeup_prescribed_date(
+        logged, athlete_message="compare to plan", topic_context=topic
+    ) == date(2026, 8, 25)
 
 
 def test_format_erg_session_comparison_makeup_uses_other_day_plan(tmp_path: Path):
