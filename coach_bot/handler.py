@@ -22,6 +22,7 @@ from generate_training_plan import (
     list_gym_logs_sharing_zulip_message,
     find_latest_elaboration_pending_erg_score,
     local_datetime_from_timestamp,
+    athlete_plan_for_date,
     enqueue_plan_adjustment,
     format_gym_log_confirmation,
     format_gym_session_comparison,
@@ -30,6 +31,7 @@ from generate_training_plan import (
     mark_erg_score_elaboration_sent,
     missing_plan_reply,
     plan_for_date,
+    session_from_plan,
     record_erg_score_from_images,
     record_erg_score_from_text,
     record_gym_sessions_from_zulip_for_athletes,
@@ -37,6 +39,7 @@ from generate_training_plan import (
     set_erg_score_coach_reply_message_id,
     set_gym_log_coach_reply_message_id,
     week_for_date,
+    WeeklyPlanRecord,
     _parse_erg_score_session_date,
     find_erg_score_by_zulip_message,
     resolve_makeup_prescribed_date,
@@ -65,7 +68,19 @@ from coach_bot.erg_score import (
     wants_erg_coaching_elaboration,
 )
 from coach_bot.followup_triage import should_reply_to_followup
-from coach_bot.intents import strip_zulip_mentions, truncate_for_zulip
+from coach_bot.intents import (
+    looks_like_plan_adjustment,
+    strip_zulip_mentions,
+    truncate_for_zulip,
+)
+from maintenance_mode import (
+    PAUSED_WEEKLY_PLANS,
+    SYNCING_NOTICE,
+    classify_session_request,
+    config_maintenance_enabled,
+    fulfill_session_request,
+    sync_one_athlete,
+)
 from coach_bot.listen_window import (
     activate_listen_window as persist_listen_window,
     listen_state_path,
@@ -199,6 +214,11 @@ class CoachMessageHandler:
                 if rpe_reply is not None:
                     return rpe_reply
             if body:
+                maintained = self._maybe_maintenance_reply(
+                    body, message, ref, private_dm=True
+                )
+                if maintained is not None:
+                    return maintained
                 return self._reply_kagi(body, ref, message, private_dm=True)
             return None
 
@@ -239,6 +259,11 @@ class CoachMessageHandler:
         nearby = self._try_handle_nearby_erg_screenshot(message, ref, body)
         if nearby is not None:
             return nearby
+        maintained = self._maybe_maintenance_reply(
+            body, message, ref, private_dm=False
+        )
+        if maintained is not None:
+            return maintained
         return self._reply_kagi(body, ref, message)
 
     def activate_listen_window(
@@ -971,6 +996,116 @@ class CoachMessageHandler:
             print(f"Zulip topic context fetch failed: {exc}", flush=True)
             return ""
 
+    def _maintenance_enabled(self) -> bool:
+        return config_maintenance_enabled(get_config_path())
+
+    def _post_syncing_notice(
+        self, message: Dict[str, Any], *, private_dm: bool
+    ) -> None:
+        if not self.zulip_client:
+            return
+        try:
+            if private_dm or message.get("type") == "private":
+                sender_id = message.get("sender_id")
+                if sender_id is None:
+                    return
+                payload = {
+                    "type": "private",
+                    "to": [int(sender_id)],
+                    "content": SYNCING_NOTICE,
+                }
+            else:
+                stream = message.get("display_recipient") or self.zulip_stream
+                topic = self._message_topic(message) or self.zulip_topic or "general"
+                payload = {
+                    "type": "stream",
+                    "to": stream,
+                    "topic": topic,
+                    "content": SYNCING_NOTICE,
+                }
+            self.zulip_client.send_message(payload)
+        except Exception as exc:
+            print(f"Zulip sync notice failed: {exc}", flush=True)
+
+    def _maybe_maintenance_reply(
+        self,
+        body: str,
+        message: Dict[str, Any],
+        ref: datetime,
+        *,
+        private_dm: bool,
+    ) -> Optional[str]:
+        if not self._maintenance_enabled():
+            return None
+        if looks_like_plan_adjustment(body):
+            return PAUSED_WEEKLY_PLANS
+        request = classify_session_request(body, api_key=self.kagi_token)
+        if request.status == "not_a_request":
+            return None
+        _, _, _, _, _, athletes = load_bot_config()
+        sender, subject = resolve_coach_subject(
+            athletes or self.athletes,
+            sender_email=str(message.get("sender_email") or ""),
+            sender_full_name=str(message.get("sender_full_name") or ""),
+            sender_id=int(message["sender_id"])
+            if message.get("sender_id") is not None
+            else None,
+            message_content=str(message.get("content") or ""),
+            bot_user_id=self.bot_user_id,
+        )
+        if private_dm and sender is not None:
+            subject = sender
+        if subject is None:
+            return format_unmatched_sender_help(
+                sender_email=str(message.get("sender_email") or ""),
+                sender_full_name=str(message.get("sender_full_name") or ""),
+                sender_id=int(message["sender_id"])
+                if message.get("sender_id") is not None
+                else None,
+            )
+        if request.status == "incomplete":
+            return request.clarify
+        self._post_syncing_notice(message, private_dm=private_dm)
+        profile = None
+        if subject.max_hr_bpm:
+            from athlete_profile import AthleteProfile
+
+            profile = AthleteProfile(
+                id=subject.id,
+                label=subject.label,
+                max_hr_bpm=subject.max_hr_bpm,
+                body_weight_kg=subject.body_weight_kg,
+            )
+        training_context = build_athlete_training_context_for_coach(
+            self.cache_dir,
+            subject.id,
+            subject.label,
+            ref.date(),
+        )
+        token = self.kagi_token
+
+        def complete(prompt: str) -> str:
+            from openrouter_client import call_openrouter
+
+            return call_openrouter(
+                system="You are a rowing coach. Reply with one DayPlan JSON object only.",
+                user=prompt,
+                api_key=token,
+            )
+
+        return fulfill_session_request(
+            request,
+            cache_dir=self.cache_dir,
+            athlete_id=subject.id,
+            athlete_label=subject.label,
+            on=ref.date(),
+            sync=lambda: sync_one_athlete(get_config_path(), subject.id),
+            complete=complete,
+            profile=profile,
+            hr_context=subject.hr_zone_context_text(),
+            training_context=training_context,
+        )
+
     def _reply_kagi(
         self,
         text: str,
@@ -980,9 +1115,24 @@ class CoachMessageHandler:
         private_dm: bool = False,
     ) -> str:
         today = ref.date()
+        maintenance = self._maintenance_enabled()
         record = plan_for_date(self.cache_dir, today)
         if not record or not record.plan_text.strip():
-            return missing_plan_reply(week_for_date(today).week_id)
+            if not maintenance:
+                return missing_plan_reply(week_for_date(today).week_id)
+            week = week_for_date(today)
+            record = WeeklyPlanRecord(
+                week_id=week.week_id,
+                week_start=week.week_start.isoformat(),
+                week_end=week.week_end.isoformat(),
+                plan_text=(
+                    "Maintenance mode is on. There is no squad weekly plan. "
+                    "Answer from this athlete's cached training history."
+                ),
+                generated_at="",
+                training_summary="",
+                include_lifting=True,
+            )
         if not self.kagi_token:
             return (
                 "Coach Q&A is not configured: set `OPENROUTER_API_KEY` in the coach bot environment."
@@ -1015,6 +1165,21 @@ class CoachMessageHandler:
                 subject.label,
                 today,
             )
+            if maintenance:
+                personal = athlete_plan_for_date(self.cache_dir, subject.id, today)
+                if personal:
+                    section = session_from_plan(
+                        str(personal.get("plan_text") or ""),
+                        personal.get("plan_json")
+                        if isinstance(personal.get("plan_json"), dict)
+                        else None,
+                        today,
+                    )
+                    if section and section[1].strip():
+                        subject_training_context += (
+                            f"\n\n--- Today's prescribed session ({section[0]}) ---\n"
+                            f"{section[1]}"
+                        )
         msg_id = message.get("id")
         zulip_message_id = int(msg_id) if msg_id is not None else None
         try:
@@ -1176,6 +1341,8 @@ class CoachMessageHandler:
                     if reply
                     else f"Profile update failed: {exc}"
                 )
+        elif interpretation.intent == "plan_adjustment" and maintenance:
+            reply = PAUSED_WEEKLY_PLANS
         elif (
             interpretation.intent == "plan_adjustment"
             and interpretation.pending_adjustment

@@ -12,6 +12,7 @@ erg_strava/config.yaml
 erg_strava/data/*_historical_gym.json
 erg_strava_cache/
 erg_strava/erg_strava_cache/
+erg_strava/cron.log
 erg_strava_browser_profile/
 .suunto/
 bin/suuntool

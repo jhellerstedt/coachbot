@@ -19,7 +19,11 @@ services:
       OPENROUTER_STRUCTURED_MODEL: ${OPENROUTER_STRUCTURED_MODEL:-openrouter/auto}
       OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-openrouter/auto}
       OPENROUTER_COST_TIER: ${OPENROUTER_COST_TIER:-low}
+      SUUNTOOL_SESSION_FILE: /suunto/session.json
     volumes:
       - ../erg_strava/erg_strava_cache:/data/cache
       - ../zuliprc:/app/zuliprc:ro
       - ../erg_strava/config.yaml:/app/config.yaml:ro
+      # Host cron already has these. The bot syncs one athlete in maintenance mode.
+      - ${SUUNTOOL_BIN:-../bin/suuntool}:/usr/local/bin/suuntool:ro
+      - ${SUUNTOOL_SESSION:-${HOME}/.config/suuntool/session.json}:/suunto/session.json:ro

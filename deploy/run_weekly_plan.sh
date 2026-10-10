@@ -5,6 +5,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck disable=SC1091
+source "$ROOT/deploy/pull_updates.sh"
+coachbot_pull_then_reexec "$ROOT" "$0" "$@"
+
 if [[ -f "$ROOT/.venv/bin/activate" ]]; then
   # shellcheck disable=SC1091
   source "$ROOT/.venv/bin/activate"

@@ -34,7 +34,11 @@ fi
 
 # cache_dir in config.yaml stays ./erg_strava_cache (relative to erg_strava/)
 
-chmod +x "$COACHBOT/deploy/run_weekly_plan.sh"
+chmod +x \
+  "$COACHBOT/deploy/run_weekly_plan.sh" \
+  "$COACHBOT/deploy/pull_updates.sh" \
+  "$COACHBOT/deploy/update_bot.sh" \
+  "$COACHBOT/deploy/restart-bot.sh"
 
 if [[ ! -d "$COACHBOT/.venv" ]]; then
   python3 -m venv "$COACHBOT/.venv"

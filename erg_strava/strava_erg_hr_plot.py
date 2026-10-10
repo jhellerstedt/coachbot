@@ -2193,6 +2193,13 @@ def main() -> None:
         sys.exit(1)
 
     raw_config = yaml.safe_load(cfg_path.read_text()) if yaml else {}
+    if not isinstance(raw_config, dict):
+        raw_config = {}
+    from maintenance_mode import maintenance_mode_enabled
+
+    if maintenance_mode_enabled(raw_config):
+        print("Maintenance mode is on; skipping weekly sync and plan generation.")
+        sys.exit(0)
 
     if not args.plot_only:
         target_week = plan_week_bounds()

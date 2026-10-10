@@ -41,8 +41,8 @@ docker compose -f coach_bot/docker-compose.yml up --build
 
 See [deploy/README.md](deploy/README.md). On the server:
 
-- **Bot:** `~/coachbot` → `docker compose` in `coach_bot/`
-- **Weekly cron:** `deploy/run_weekly_plan.sh` (Sun 17:45 Melbourne)
+- **Bot:** `~/coachbot` → `docker compose` in `coach_bot/`. The image bakes source at build time and does not restart daily. `deploy/update_bot.sh` (daily crontab in `deploy/README.md`) pulls and rebuilds when new commits arrive.
+- **Weekly cron:** `deploy/run_weekly_plan.sh` (Sun 17:45 Melbourne) pulls `--ff-only` before the plan run.
 
 ## Session library
 

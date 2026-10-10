@@ -4,6 +4,10 @@ cache_dir: ./erg_strava_cache
 # Plan weeks and activity matching use this IANA timezone (Mon–Sun local).
 plan_timezone: Australia/Melbourne
 
+# When true, the Sunday job exits before sync and plan generation. Athletes
+# ask the bot for one session instead (gym session, leg day, 45min).
+# maintenance_mode: true
+
 # Season master plan (erg_strava_cache/season_master_plan.md): macro targets for expert
 # review and weekly plan input. Edit Tgt/phase/Tgt priority/notes in the markdown;
 # use strava_erg_hr_plot.py --refresh-season-plan to LLM-regenerate macro targets.
