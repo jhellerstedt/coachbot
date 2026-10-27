@@ -33,6 +33,7 @@ from weekly_plan_schema import (
     validate_weekly_plan,
     weekly_plan_to_dict,
     gym_working_set_bounds,
+    openrouter_day_response_format,
 )
 from generate_training_plan import adapt_goal_tracking_for_phase, sanitize_plan_prose
 
@@ -908,3 +909,27 @@ def test_personalize_plan_rowing_hr_overlays_days_and_alternative():
     assert thu.rowing.erg_alternative.segments[0].hr_bpm_min == t3[0]
     assert plan.days[1].rowing is not None
     assert tue.rowing.segments[0].split_min == plan.days[1].rowing.segments[0].split_min
+
+
+def test_openrouter_day_response_format_is_one_strict_day():
+    fmt = openrouter_day_response_format()
+    assert fmt["type"] == "json_schema"
+    assert fmt["json_schema"]["strict"] is True
+    assert fmt["json_schema"]["name"] == "maintenance_day"
+    schema = fmt["json_schema"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) >= {
+        "weekday",
+        "date",
+        "session_type",
+        "session_subtype",
+        "gym",
+        "rowing",
+        "notes",
+    }
+    rowing = schema["properties"]["rowing"]["anyOf"][0]
+    phase_enum = rowing["properties"]["segments"]["items"]["properties"]["phase"]["enum"]
+    assert "warm_up" in phase_enum
+    assert "warmup" not in phase_enum
+    priority_enum = rowing["properties"]["segments"]["items"]["properties"]["priority"]["enum"]
+    assert priority_enum == ["split", "hr"]

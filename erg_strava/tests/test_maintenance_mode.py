@@ -16,6 +16,7 @@ from generate_training_plan import (
 from erg_prescription_compare import prescribed_erg_section_for_log
 from maintenance_mode import (
     PAUSED_WEEKLY_PLANS,
+    _session_prompt,
     classify_session_request,
     fulfill_session_request,
     maintenance_mode_enabled,
@@ -368,6 +369,108 @@ def test_invalid_model_output_does_not_save(tmp_path):
     assert calls["n"] == 2
     assert reply == "I couldn't write that session. Try the request again."
     assert not (tmp_path / "athlete_7" / "weekly_plans").exists()
+
+
+def test_interval_prompt_shows_the_dayplan_shape():
+    request = classify_session_request("interval erg, I have an hour")
+    text = _session_prompt(
+        request,
+        athlete_label="Ada",
+        on=ON,
+        hr_context="",
+        training_context="",
+        gym_context="",
+    )
+    assert '"rowing"' in text
+    assert '"phase": "warm_up"' in text
+    assert '"phase": "work"' in text
+    assert '"duration": "6x3min"' in text
+    assert '"priority": "split"' in text
+    assert "segments at the top level" in text
+
+
+def test_rejected_shape_is_retried_with_the_validator_reason(tmp_path):
+    _write_erg_score(tmp_path, 7)
+    prompts = []
+
+    def complete(prompt: str) -> str:
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return json.dumps(
+                {
+                    "session_type": "erg",
+                    "segments": [
+                        {
+                            "phase": "warmup",
+                            "duration_min": 10,
+                            "zone_z": 2,
+                            "zone_t": "endurance",
+                            "priority": "required",
+                        }
+                    ],
+                }
+            )
+        return json.dumps(_interval_payload())
+
+    reply = fulfill_session_request(
+        classify_session_request("interval erg, I have an hour"),
+        cache_dir=tmp_path,
+        athlete_id=7,
+        athlete_label="Ada",
+        on=ON,
+        sync=lambda: True,
+        complete=complete,
+        profile=AthleteProfile(id=7, label="Ada", max_hr_bpm=185),
+    )
+    assert len(prompts) == 2
+    assert "expected an erg day" in prompts[1]
+    assert "Saved as today's prescription." in reply
+    assert (tmp_path / "athlete_7" / "weekly_plans").is_dir()
+
+
+def test_model_exception_is_retried_once(tmp_path):
+    _write_erg_score(tmp_path, 7)
+    calls = {"n": 0}
+
+    def complete(_prompt: str) -> str:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("timeout")
+        return json.dumps(_interval_payload())
+
+    reply = fulfill_session_request(
+        classify_session_request("interval erg, I have an hour"),
+        cache_dir=tmp_path,
+        athlete_id=7,
+        athlete_label="Ada",
+        on=ON,
+        sync=lambda: True,
+        complete=complete,
+        profile=AthleteProfile(id=7, label="Ada", max_hr_bpm=185),
+    )
+    assert calls["n"] == 2
+    assert "Saved as today's prescription." in reply
+
+
+def test_session_day_completion_sends_the_day_schema(monkeypatch):
+    captured = {}
+
+    def fake_call_openrouter(**kwargs):
+        captured.update(kwargs)
+        return "{}"
+
+    monkeypatch.setattr(
+        "openrouter_client.call_openrouter",
+        fake_call_openrouter,
+    )
+    from maintenance_mode import session_day_completion
+
+    assert session_day_completion("prescribe Tuesday", "test-key") == "{}"
+    assert captured["user"] == "prescribe Tuesday"
+    assert captured["api_key"] == "test-key"
+    assert captured["response_format"]["type"] == "json_schema"
+    assert captured["response_format"]["json_schema"]["name"] == "maintenance_day"
+    assert captured["response_format"]["json_schema"]["strict"] is True
 
 
 def test_plan_adjustment_constant_matches_spec():

@@ -1085,13 +1085,9 @@ class CoachMessageHandler:
         token = self.kagi_token
 
         def complete(prompt: str) -> str:
-            from openrouter_client import call_openrouter
+            from maintenance_mode import session_day_completion
 
-            return call_openrouter(
-                system="You are a rowing coach. Reply with one DayPlan JSON object only.",
-                user=prompt,
-                api_key=token,
-            )
+            return session_day_completion(prompt, token)
 
         return fulfill_session_request(
             request,

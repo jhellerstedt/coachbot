@@ -39,6 +39,58 @@ SYNCING_NOTICE = "Syncing your latest sessions…"
 SYNC_FAILED_LINE = "Sync failed; this session uses your cached data."
 SAVED_LINE = "Saved as today's prescription."
 WRITE_FAILED = "I couldn't write that session. Try the request again."
+_DAYPLAN_SHAPE = """\
+Reply with one DayPlan JSON object in this shape. Do not put segments at the top level.
+phase is warm_up, main_set, cool_down, work, rest, build, or active_recovery.
+zone_z is Z1, Z2, Z3, Z4, or Z5. zone_t is T1, T2, T3, T4, T5, T6, or T7.
+priority is split or hr. duration is a string such as "10 min" or "6x3min", not a number.
+For an interval request, session_subtype is "intervals" and the work duration matches NxNmin, such as 6x3min, or there are at least two phase=work segments.
+{
+  "weekday": "Tuesday",
+  "date": "2026-10-27",
+  "session_type": "erg",
+  "session_subtype": "intervals",
+  "gym": null,
+  "rowing": {
+    "segments": [
+      {
+        "phase": "warm_up",
+        "label": "Warm-up",
+        "duration": "10 min",
+        "split_min": "2:15",
+        "split_max": "2:25",
+        "zone_z": "Z2",
+        "zone_t": "T2",
+        "hr_bpm_min": 120,
+        "hr_bpm_max": 140,
+        "priority": "hr",
+        "notes": null
+      },
+      {
+        "phase": "work",
+        "label": "6x3min",
+        "duration": "6x3min",
+        "split_min": "1:58",
+        "split_max": "2:04",
+        "zone_z": "Z4",
+        "zone_t": "T5",
+        "hr_bpm_min": 165,
+        "hr_bpm_max": 180,
+        "priority": "split",
+        "notes": null
+      }
+    ],
+    "erg_alternative": null
+  },
+  "notes": null
+}"""
+_PARSE_RETRY = (
+    "\n\nThe previous reply was rejected because it is not a DayPlan. "
+    "Put the pieces in rowing.segments. "
+    "phase must be one of warm_up, main_set, cool_down, work, rest, build, active_recovery. "
+    "zone_z must be Z1, Z2, Z3, Z4, or Z5. zone_t must be T1 through T7. "
+    "priority must be split or hr. duration must be a string such as 10 min or 6x3min."
+)
 
 _ON_VALUES = frozenset({"true", "yes", "on", "1"})
 _SET_NOTATION_RE = re.compile(
@@ -447,6 +499,7 @@ def _session_prompt(
         "split_max, zone_z, zone_t, hr_bpm_min, hr_bpm_max, and priority. "
         "Use their recent loads. Heart-rate targets are absolute bpm."
     )
+    lines.append(_DAYPLAN_SHAPE)
     if hr_context:
         lines.append(hr_context)
     if training_context:
@@ -475,19 +528,55 @@ def generate_session_day(
         training_context=training_context,
         gym_context=gym_context,
     )
+    feedback = ""
+    last_reason = "not a DayPlan"
     for _attempt in range(2):
         try:
-            raw = complete(prompt)
-        except Exception:
-            return None
+            raw = complete(prompt + feedback)
+        except Exception as exc:
+            last_reason = f"model call raised {type(exc).__name__}: {exc}"
+            feedback = (
+                "\n\nThe previous reply could not be parsed. "
+                "Reply with one DayPlan JSON object only."
+            )
+            continue
+        if str(raw).startswith("OpenRouter API"):
+            last_reason = str(raw)[:300]
+            feedback = (
+                "\n\nThe previous reply could not be parsed. "
+                "Reply with one DayPlan JSON object only."
+            )
+            continue
         day = day_from_model_text(raw, on)
         if day is None:
+            last_reason = "not a DayPlan"
+            feedback = _PARSE_RETRY
             continue
         if profile is not None and day.rowing is not None:
             day = replace(day, rowing=_overlay_rowing_hr(day.rowing, profile))
-        if validate_generated_day(day, request) is None:
+        reason = validate_generated_day(day, request)
+        if reason is None:
             return day
+        last_reason = reason
+        feedback = (
+            f"\n\nThe previous day was rejected: {reason}. "
+            "Reply with one corrected DayPlan JSON object."
+        )
+    print(f"maintenance session rejected: {last_reason}", flush=True)
     return None
+
+
+def session_day_completion(prompt: str, api_key: str) -> str:
+    """Ask OpenRouter for one DayPlan, constrained to the day schema."""
+    from openrouter_client import call_openrouter
+    from weekly_plan_schema import openrouter_day_response_format
+
+    return call_openrouter(
+        system="You are a rowing coach. Reply with one DayPlan JSON object only.",
+        user=prompt,
+        api_key=api_key,
+        response_format=openrouter_day_response_format(),
+    )
 
 
 def has_gym_history(cache_dir: Path, athlete_id: int) -> bool:

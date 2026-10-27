@@ -102,3 +102,21 @@ def test_complete_request_posts_syncing_notice(tmp_path: Path):
     payload = client.send_message.call_args[0][0]
     assert payload["content"] == SYNCING_NOTICE
     assert payload["type"] == "private"
+
+
+def test_complete_request_completes_with_the_day_schema(tmp_path: Path):
+    client = MagicMock()
+    handler = _handler(tmp_path, client)
+    with _config(handler), patch(
+        "coach_bot.handler.config_maintenance_enabled", return_value=True
+    ), patch(
+        "coach_bot.handler.fulfill_session_request", return_value="the workout"
+    ) as fulfill, patch(
+        "maintenance_mode.session_day_completion", return_value="{}"
+    ) as complete_day:
+        reply = handler.handle(_message("gym session, leg day, 45min"))
+        complete = fulfill.call_args.kwargs["complete"]
+        assert complete("a prompt") == "{}"
+    assert reply == "the workout"
+    complete_day.assert_called_once()
+    assert complete_day.call_args.args[0] == "a prompt"

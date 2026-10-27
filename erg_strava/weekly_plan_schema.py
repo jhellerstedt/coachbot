@@ -432,6 +432,18 @@ def openrouter_response_format(*, name: str = "weekly_training_plan") -> Dict[st
     }
 
 
+def openrouter_day_response_format(*, name: str = "maintenance_day") -> Dict[str, Any]:
+    """Strict schema for one maintenance-mode DayPlan."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            "strict": True,
+            "schema": _day_schema(),
+        },
+    }
+
+
 # --- Logged gym session JSON harness (coach-bot / Strava workout transcripts) ---
 
 _LOGGED_GYM_EXERCISE_ALIASES: Dict[str, str] = {
