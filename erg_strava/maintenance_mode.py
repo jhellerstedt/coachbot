@@ -726,7 +726,8 @@ def fulfill_session_request(
     try:
         if sync() is False:
             sync_failed = True
-    except Exception:
+    except Exception as exc:
+        print(f"Athlete sync failed: {type(exc).__name__}: {exc}", flush=True)
         sync_failed = True
     modality = request.modality or ""
     has_history = (
@@ -804,7 +805,11 @@ def sync_one_athlete(config_path: Path, athlete_id: int) -> bool:
         )
         if result is False:
             ok = False
-    except Exception:
+    except Exception as exc:
+        print(
+            f"[{acfg.label}] Athlete sync failed: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
         ok = False
     finally:
         if transport is not None:

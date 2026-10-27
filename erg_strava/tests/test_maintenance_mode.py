@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -471,6 +472,39 @@ def test_session_day_completion_sends_the_day_schema(monkeypatch):
     assert captured["response_format"]["type"] == "json_schema"
     assert captured["response_format"]["json_schema"]["name"] == "maintenance_day"
     assert captured["response_format"]["json_schema"]["strict"] is True
+
+
+def test_sync_exception_is_logged_and_uses_cache(tmp_path, capsys):
+    _write_erg_score(tmp_path, 7)
+
+    def sync() -> bool:
+        raise ModuleNotFoundError("No module named 'stravalib'")
+
+    def complete(_prompt: str) -> str:
+        return json.dumps(_interval_payload())
+
+    reply = fulfill_session_request(
+        classify_session_request("interval erg, I have an hour"),
+        cache_dir=tmp_path,
+        athlete_id=7,
+        athlete_label="Ada",
+        on=ON,
+        sync=sync,
+        complete=complete,
+        profile=AthleteProfile(id=7, label="Ada", max_hr_bpm=185),
+    )
+    assert reply.startswith("Sync failed; this session uses your cached data.")
+    assert "Saved as today's prescription." in reply
+    assert "No module named 'stravalib'" in capsys.readouterr().out
+
+
+def test_bot_image_installs_sync_dependencies():
+    root = Path(__file__).resolve().parents[2]
+    requirements = (root / "coach_bot" / "requirements.txt").read_text(encoding="utf-8")
+    dockerfile = (root / "coach_bot" / "Dockerfile").read_text(encoding="utf-8")
+    assert "stravalib>=1.5" in requirements
+    assert "fitparse>=1.2" in requirements
+    assert "PYTHONUNBUFFERED=1" in dockerfile
 
 
 def test_plan_adjustment_constant_matches_spec():

@@ -11,6 +11,7 @@ COPY lighties/send_to_zulip.py /app/lighties/send_to_zulip.py
 COPY lighties/zulip_topic_context.py /app/lighties/zulip_topic_context.py
 
 ENV PYTHONPATH=/app:/app/erg_strava:/app/lighties
+ENV PYTHONUNBUFFERED=1
 ENV CONFIG_PATH=/app/config.yaml
 ENV CACHE_DIR=/data/cache
 ENV ZULIPRC_PATH=/app/zuliprc
