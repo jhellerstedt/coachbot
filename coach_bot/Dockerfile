@@ -2,6 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# pytesseract needs the tesseract binary; erg_strava/requirements.txt calls that out.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY coach_bot/requirements.txt /app/coach_bot/requirements.txt
 RUN pip install --no-cache-dir -r /app/coach_bot/requirements.txt
 
