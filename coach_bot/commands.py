@@ -5,14 +5,15 @@ from __future__ import annotations
 import threading
 
 KDE_NOTICE = (
-    "Syncing Strava and Suunto, merging erg screenshots, then posting the KDE plot…"
+    "Syncing Strava and Suunto, merging erg screenshots, "
+    "checking Hammerhead + SRM bike power, then posting the KDE plot…"
 )
 KDE_BUSY = "A KDE refresh is already running."
 
 _KDE_LOCK = threading.Lock()
 
 _HELP = """**Commands**
-- `kde` — sync Strava and Suunto for athletes with credentials, merge each Suunto workout with an erg screenshot logged for the same activity, draw the erg split/HR KDE plot, and post it to `#general > project-640`. No weekly plan."""
+- `kde` — sync Strava and Suunto for athletes with credentials, merge each Suunto workout with an erg screenshot logged for the same activity, draw the KDE plot (erg split and watts on the top row, Hammerhead + SRM bike power and heart rate since 2025-03-07 on the bottom row), and post it to `#general > project-640`. No weekly plan."""
 
 
 def match_action_command(body: str) -> str | None:

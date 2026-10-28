@@ -1740,23 +1740,55 @@ def _format_split_seconds_mmss(sec: float, _pos: Optional[int] = None) -> str:
     return f"{m}:{s:04.1f}"
 
 
+def _power_xlim(watts: pd.Series) -> Tuple[float, float]:
+    """Shared watt limits with higher power on the left, matching fast splits."""
+    from bike_power import split_seconds_to_watts
+
+    values = pd.to_numeric(watts, errors="coerce").dropna()
+    slow_w = split_seconds_to_watts(SPLIT_500_MAX_DISPLAY_SEC)
+    fast_w = split_seconds_to_watts(float(SPLIT_500_MIN_DISPLAY_SEC))
+    if values.empty:
+        return fast_w, slow_w
+    values = values[(values >= slow_w * 0.5) & (values <= fast_w * 1.05)]
+    if values.empty:
+        return fast_w, slow_w
+    hi = min(float(values.max()), fast_w)
+    lo = max(float(values.min()), slow_w * 0.5)
+    pad = (hi - lo) * 0.05 + 5.0
+    left = min(hi + pad, fast_w * 1.05)
+    right = max(lo - pad, 40.0)
+    if left <= right:
+        left, right = fast_w, slow_w
+    return left, right
+
+
 def plot_three_panels(
     df: pd.DataFrame,
     output: Path,
     now: Optional[datetime] = None,
     athletes: Optional[List[AthleteCfg]] = None,
+    bike_df: Optional[pd.DataFrame] = None,
 ) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FuncFormatter
     import seaborn as sns
 
-    if df.empty:
+    from bike_power import add_concept2_watts, watts_to_split_seconds
+
+    if bike_df is None:
+        bike_df = pd.DataFrame()
+    if df.empty and bike_df.empty:
         print("No data to plot.")
         return
+    erg_df = add_concept2_watts(df) if not df.empty else df
     now = now or datetime.now(timezone.utc)
-    plot_athletes = list(df["athlete"].unique())
-    single = len(plot_athletes) == 1
-    period_colors = athlete_period_color_map(plot_athletes)
+    plot_athletes = list(erg_df["athlete"].unique()) if not erg_df.empty else []
+    bike_athletes = (
+        list(bike_df["athlete"].unique()) if not bike_df.empty and "athlete" in bike_df.columns else []
+    )
+    color_athletes = list(dict.fromkeys([*plot_athletes, *bike_athletes])) or ["Athlete"]
+    single = len(color_athletes) == 1
+    period_colors = athlete_period_color_map(color_athletes)
     bw_adjust = 0.9 if single else 1.0
 
     subplots = [
@@ -1764,60 +1796,62 @@ def plot_three_panels(
         ("six_months", "6 months vs 3–9 mo ago"),
         ("one_month", "~30 days vs 2–6 wk ago"),
     ]
-
-    x_all = df["split_500"].astype(float)
-    y_all = df["hr"].astype(float)
-    xmax, xmin = float(x_all.max()), float(x_all.min())
-    ymax, ymin = float(y_all.max()), float(y_all.min())
-    pad_x = (xmax - xmin) * 0.05 + 1.0
+    rows = (
+        (erg_df, "watts", "Erg"),
+        (bike_df, "watts", "Bike"),
+    )
+    hr_parts = []
+    if not erg_df.empty:
+        hr_parts.append(erg_df["hr"].astype(float))
+    if not bike_df.empty and "hr" in bike_df.columns:
+        hr_parts.append(bike_df["hr"].astype(float))
+    y_all = pd.concat(hr_parts, ignore_index=True) if hr_parts else pd.Series(dtype=float)
+    if y_all.empty:
+        ymin, ymax = 80.0, 180.0
+    else:
+        ymax, ymin = float(y_all.max()), float(y_all.min())
     pad_y = (ymax - ymin) * 0.05 + 1.0
-    x_hi = min(xmax + pad_x, SPLIT_500_MAX_DISPLAY_SEC)
-    x_lo = max(xmin - pad_x, float(SPLIT_500_MIN_DISPLAY_SEC))
-    if x_lo >= x_hi:
-        # All splits slower than 2:45 (or narrow range): keep a readable window up to the cap.
-        x_hi = float(SPLIT_500_MAX_DISPLAY_SEC)
-        x_lo = max(float(SPLIT_500_MIN_DISPLAY_SEC), x_hi - 75.0)
+    watt_parts = []
+    if not erg_df.empty and "watts" in erg_df.columns:
+        watt_parts.append(erg_df["watts"])
+    if not bike_df.empty and "watts" in bike_df.columns:
+        watt_parts.append(bike_df["watts"])
+    x_left, x_right = _power_xlim(
+        pd.concat(watt_parts, ignore_index=True) if watt_parts else pd.Series(dtype=float)
+    )
 
     fig, axes = plt.subplots(
-        1,
+        2,
         3,
-        figsize=(13.2, 4.1) if single else (14, 4.5),
+        figsize=(13.2, 8.2) if single else (14, 8.8),
         sharex=True,
         sharey=True,
     )
-    kde_common = dict(
-        x="split_500",
-        y="hr",
-        fill=False,
-        levels=12,
-        thresh=0.05,
-        bw_adjust=bw_adjust,
-        alpha=0.7,
-    )
 
-    def _kdeplot_points(
-        ax,
-        pts,
-        *,
-        color: str,
-        linewidth: float,
-        zorder: int,
-    ) -> None:
-        if pts.empty:
+    def _kdeplot_points(ax, pts, *, x_col: str, color: str, linewidth: float, zorder: int) -> None:
+        if pts.empty or x_col not in pts.columns:
             return
-        plot_pts = pts
+        plot_pts = pts.dropna(subset=[x_col, "hr"])
+        if plot_pts.empty:
+            return
         if len(plot_pts) > KDE_MAX_POINTS:
             plot_pts = plot_pts.sample(n=KDE_MAX_POINTS, random_state=42)
         sns.kdeplot(
             data=plot_pts,
+            x=x_col,
+            y="hr",
+            fill=False,
+            levels=12,
+            thresh=0.05,
+            bw_adjust=bw_adjust,
+            alpha=0.7,
             color=color,
             linewidth=linewidth,
             ax=ax,
             zorder=zorder,
-            **kde_common,
         )
         for px, py in kde_density_peaks(
-            plot_pts["split_500"].to_numpy(),
+            plot_pts[x_col].to_numpy(),
             plot_pts["hr"].to_numpy(),
             n_peaks=2,
             bw_adjust=bw_adjust,
@@ -1833,55 +1867,69 @@ def plot_three_panels(
                 zorder=zorder + 1,
             )
 
-    for ax, (key, title) in zip(axes, subplots):
-        period_labels = panel_period_labels(key, now)
-        # Older window first; recent window last so it renders on top.
-        for period in (2, 1):
-            period_zorder = 2 if period == 2 else 10
-            for athlete_idx, athlete in enumerate(plot_athletes):
-                mask = panel_period_mask(df, key, period, now) & (
-                    df["athlete"] == athlete
-                )
-                pts = df.loc[mask]
-                _kdeplot_points(
-                    ax,
-                    pts,
-                    color=period_colors[(athlete, period)],
-                    linewidth=1.4 if single else 1.2,
-                    zorder=period_zorder + athlete_idx,
-                )
-        if single:
-            athlete = plot_athletes[0]
-            ax.legend(
-                handles=[
-                    plt.Line2D(
-                        [0],
-                        [0],
-                        color=period_colors[(athlete, period)],
-                        linewidth=1.4,
-                        alpha=0.7,
-                        label=label,
+    def _split_tick(watts: float, _pos: Optional[int] = None) -> str:
+        return _format_split_seconds_mmss(watts_to_split_seconds(watts))
+
+    for row_i, (row_df, x_col, row_name) in enumerate(rows):
+        row_athletes = (
+            list(row_df["athlete"].unique())
+            if not row_df.empty and "athlete" in row_df.columns
+            else []
+        )
+        for ax, (key, title) in zip(axes[row_i], subplots):
+            period_labels = panel_period_labels(key, now)
+            title_df = row_df if not row_df.empty else erg_df
+            if title_df is None or title_df.empty:
+                ax.set_title(f"{row_name}\n{title}")
+            else:
+                ax.set_title(f"{row_name}: {subplot_title_with_range(title, key, now, title_df)}")
+            if row_athletes:
+                for period in (2, 1):
+                    period_zorder = 2 if period == 2 else 10
+                    for athlete_idx, athlete in enumerate(row_athletes):
+                        mask = panel_period_mask(row_df, key, period, now) & (
+                            row_df["athlete"] == athlete
+                        )
+                        _kdeplot_points(
+                            ax,
+                            row_df.loc[mask],
+                            x_col=x_col,
+                            color=period_colors[(athlete, period)],
+                            linewidth=1.4 if single else 1.2,
+                            zorder=period_zorder + athlete_idx,
+                        )
+                if single and row_i == 0:
+                    athlete = row_athletes[0]
+                    ax.legend(
+                        handles=[
+                            plt.Line2D(
+                                [0],
+                                [0],
+                                color=period_colors[(athlete, period)],
+                                linewidth=1.4,
+                                alpha=0.7,
+                                label=label,
+                            )
+                            for period, label in zip((1, 2), period_labels, strict=True)
+                        ],
+                        loc="upper right",
+                        fontsize=8,
+                        framealpha=0.85,
                     )
-                    for period, label in zip((1, 2), period_labels, strict=True)
-                ],
-                loc="upper right",
-                fontsize=8,
-                framealpha=0.85,
-            )
-        ax.set_title(subplot_title_with_range(title, key, now, df))
-        ax.set_xlabel("500 m split (MM:SS)")
-        ax.grid(True, alpha=0.22 if single else 0.3)
+            ax.set_xlabel("Power (W)")
+            ax.grid(True, alpha=0.22 if single else 0.3)
+            ax.tick_params(labelbottom=True)
+            if row_i == 0:
+                secax = ax.secondary_xaxis("top", functions=(lambda v: v, lambda v: v))
+                secax.xaxis.set_major_formatter(FuncFormatter(_split_tick))
+                secax.set_xlabel("500 m split")
+        axes[row_i, 0].set_ylabel(f"{row_name}\nHeart rate (bpm)")
 
-    split_fmt = FuncFormatter(_format_split_seconds_mmss)
-    for ax in axes:
-        ax.xaxis.set_major_formatter(split_fmt)
-
-    axes[0].set_ylabel("Heart rate (bpm)")
-    for ax in axes:
-        ax.set_xlim(x_lo, x_hi)
+    for ax in axes.ravel():
+        ax.set_xlim(x_left, x_right)
         ax.set_ylim(ymin - pad_y, ymax + pad_y)
 
-    plot_labels = athlete_labels_in_plot(df, athletes)
+    plot_labels = athlete_labels_in_plot(df, athletes) if not df.empty else []
     if plot_labels:
         fig.suptitle(", ".join(plot_labels), y=1.14 if not single else 1.02)
 
@@ -2221,9 +2269,14 @@ def refresh_kde_plot(config_path: Path) -> str:
         photo_cfg,
         suunto_cfg=suunto_cfg,
     )
+    from bike_power import sync_and_collect_bike_power
+
+    bike_df = sync_and_collect_bike_power(
+        athletes, cache_dir, suunto_cfg, config_base
+    )
     out = cache_dir / "erg_split_hr.png"
-    plot_three_panels(df, out, athletes=athletes)
-    if df.empty:
+    plot_three_panels(df, out, athletes=athletes, bike_df=bike_df)
+    if df.empty and bike_df.empty:
         return _kde_reply(problems, KDE_NO_POINTS)
     if not out.is_file() or not post_plot_to_zulip(
         out,
@@ -2458,11 +2511,16 @@ def main() -> None:
         photo_cfg,
         suunto_cfg=suunto_cfg,
     )
+    from bike_power import sync_and_collect_bike_power
+
+    bike_df = sync_and_collect_bike_power(
+        athletes, cache_dir, suunto_cfg, cfg_path.parent.resolve()
+    )
     out = Path(args.output)
     if not out.is_absolute():
         out = (cfg_path.parent / out).resolve()
-    plot_three_panels(df, out, athletes=athletes)
-    if not args.no_zulip and not df.empty and out.is_file():
+    plot_three_panels(df, out, athletes=athletes, bike_df=bike_df)
+    if not args.no_zulip and (not df.empty or not bike_df.empty) and out.is_file():
         last_run = load_erg_plot_last_run(cache_dir)
         summary = format_new_erg_data_summary(
             df,

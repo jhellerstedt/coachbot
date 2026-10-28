@@ -59,8 +59,9 @@ def _points() -> pd.DataFrame:
 
 
 def _patches(tmp_path: Path, df: pd.DataFrame, *, sync_result=True, post_ok=True):
-    def plot(_df, out: Path, athletes=None):
-        if not _df.empty:
+    def plot(_df, out: Path, athletes=None, bike_df=None):
+        bike_empty = bike_df is None or bike_df.empty
+        if not _df.empty or not bike_empty:
             out.write_bytes(b"png")
 
     return (
