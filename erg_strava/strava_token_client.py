@@ -13,6 +13,7 @@ See ``lighties/STRAVA_SETUP.md`` and ``lighties/regenerate_strava_token.py``.
 from __future__ import annotations
 
 import logging
+import os
 import warnings
 from pathlib import Path
 from typing import Optional
@@ -69,6 +70,31 @@ def configure_strava_warnings() -> None:
     _STRAVA_LOGGING_CONFIGURED = True
 
 
+def _load_token_dir_env(base: Path) -> None:
+    """Load ``token_dir/.env`` without overriding variables already set.
+
+    The bot image does not install python-dotenv. Strava refresh still needs
+    ``STRAVA_CLIENT_ID`` and ``STRAVA_CLIENT_SECRET`` from that file.
+    """
+    env = base / ".env"
+    if not env.is_file():
+        if load_dotenv:
+            load_dotenv()
+        return
+    if load_dotenv:
+        load_dotenv(env, override=False)
+        return
+    for line in env.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def get_strava_client(token_dir: Optional[Path] = None) -> Client:
     """
     Build a :class:`stravalib.Client` from token files under ``token_dir``.
@@ -79,12 +105,7 @@ def get_strava_client(token_dir: Optional[Path] = None) -> Client:
     configure_strava_warnings()
     base = Path(token_dir).resolve() if token_dir else Path(__file__).resolve().parent
 
-    if load_dotenv:
-        env = base / ".env"
-        if env.is_file():
-            load_dotenv(env)
-        else:
-            load_dotenv()
+    _load_token_dir_env(base)
 
     token_file = base / "strava_token"
     if not token_file.is_file():

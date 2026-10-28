@@ -559,9 +559,14 @@ def load_config(
         raise RuntimeError("PyYAML is required: pip install pyyaml")
     raw = yaml.safe_load(path.read_text())
     base = path.parent.resolve()
-    cache_dir = Path(raw.get("cache_dir", "./erg_strava_cache"))
-    if not cache_dir.is_absolute():
-        cache_dir = (base / cache_dir).resolve()
+    # The bot container mounts the host cache at CACHE_DIR. A relative
+    # cache_dir in config.yaml is next to that file (/app), which is not writable.
+    if os.environ.get("CACHE_DIR"):
+        cache_dir = Path(os.environ["CACHE_DIR"]).resolve()
+    else:
+        cache_dir = Path(raw.get("cache_dir", "./erg_strava_cache"))
+        if not cache_dir.is_absolute():
+            cache_dir = (base / cache_dir).resolve()
     erg_types = frozenset(
         raw.get("erg_sport_types", ["VirtualRow", "Rowing"])
     )

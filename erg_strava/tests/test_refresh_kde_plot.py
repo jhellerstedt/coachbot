@@ -12,6 +12,7 @@ from strava_erg_hr_plot import (
     Concept2PhotoCfg,
     GymCfg,
     StravaCfg,
+    load_config,
     refresh_kde_plot,
 )
 from suunto_client import SuuntoCfg
@@ -77,6 +78,16 @@ def _patches(tmp_path: Path, df: pd.DataFrame, *, sync_result=True, post_ok=True
         patch("strava_erg_hr_plot.sync_activity_metrics_cache"),
         patch("strava_erg_hr_plot.send_athlete_data_alerts_safely"),
     )
+
+
+def test_load_config_uses_cache_dir_from_the_environment(tmp_path, monkeypatch):
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "config.yaml").write_text("cache_dir: ./erg_strava_cache\nathletes: []\n")
+    mounted = tmp_path / "data" / "cache"
+    monkeypatch.setenv("CACHE_DIR", str(mounted))
+    cache_dir, *_rest = load_config(app / "config.yaml")
+    assert cache_dir == mounted.resolve()
 
 
 def test_refresh_syncs_merges_and_posts_without_a_plan(tmp_path: Path):
