@@ -2111,6 +2111,145 @@ def post_plot_to_zulip(
     )
 
 
+KDE_POSTED = "Posted the KDE plot to #general > project-640."
+KDE_NO_POINTS = "Sync finished, but there were no erg points to plot."
+KDE_POST_FAILED = "Drew the KDE plot but could not post it to Zulip."
+
+
+def _kde_reply(problems: List[str], outcome: str) -> str:
+    if not problems:
+        return outcome
+    return "\n".join([*problems, outcome])
+
+
+def refresh_kde_plot(config_path: Path) -> str:
+    """Sync athletes, merge Suunto workouts with erg screenshots, post the KDE plot.
+
+    Does not generate a weekly plan or call a model.
+    """
+    cfg_path = Path(config_path).resolve()
+    (
+        cache_dir,
+        athletes,
+        erg_types,
+        require_trainer,
+        photo_cfg,
+        gym_cfg,
+        suunto_cfg,
+        strava_cfg,
+    ) = load_config(cfg_path)
+    config_base = cfg_path.parent.resolve()
+    creds = resolve_available_strava_credentials(athletes, config_base)
+    transport: Optional[StravaTransport] = None
+    token_owner_id: Optional[int] = None
+    suunto_sync_errors: Dict[int, str] = {}
+    if creds is not None:
+        transport, token_owner_id, _token_dir = creds
+    problems: List[str] = []
+    try:
+        for acfg in athletes:
+            acfg_transport = transport
+            if transport is not None and token_owner_id != acfg.id:
+                print(
+                    f"[{acfg.label}] Strava sync skipped: only credentials "
+                    f"for athlete {token_owner_id}."
+                )
+                acfg_transport = None
+            try:
+                ok = sync_athlete(
+                    acfg,
+                    cache_dir,
+                    erg_types,
+                    require_trainer_for_rowing=require_trainer,
+                    force_refresh_streams=False,
+                    photo_cfg=photo_cfg,
+                    refresh_photos=False,
+                    transport=acfg_transport,
+                    suunto_cfg=suunto_cfg,
+                    strava_cfg=strava_cfg,
+                    config_base=config_base,
+                    gym_cfg=gym_cfg,
+                    full_sync=False,
+                    refresh_suunto=False,
+                    suunto_sync_errors=suunto_sync_errors,
+                )
+            except Exception as exc:
+                print(
+                    f"[{acfg.label}] Athlete sync failed: {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                problems.append(f"Sync failed for {acfg.label}: {exc}")
+                continue
+            if not ok:
+                problems.append(f"Sync failed for {acfg.label}.")
+            elif acfg.id in suunto_sync_errors:
+                problems.append(
+                    f"Sync failed for {acfg.label}: {suunto_sync_errors[acfg.id]}"
+                )
+    finally:
+        if transport is not None:
+            transport.close()
+
+    from erg_session_merge import rebuild_merged_erg_sessions_for_athlete
+
+    for acfg in athletes:
+        try:
+            rebuild_merged_erg_sessions_for_athlete(
+                cache_dir,
+                acfg.id,
+                athlete_label=acfg.label,
+                erg_types=erg_types,
+                require_trainer_for_rowing=require_trainer,
+            )
+        except Exception as exc:
+            print(
+                f"[{acfg.label}] Erg session merge failed: {type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            problems.append(f"Merge failed for {acfg.label}: {exc}")
+
+    df = collect_all_points(
+        athletes,
+        cache_dir,
+        erg_types,
+        require_trainer,
+        photo_cfg,
+        suunto_cfg=suunto_cfg,
+    )
+    out = cache_dir / "erg_split_hr.png"
+    plot_three_panels(df, out, athletes=athletes)
+    if df.empty:
+        return _kde_reply(problems, KDE_NO_POINTS)
+    if not out.is_file() or not post_plot_to_zulip(
+        out,
+        stream=ZULIP_STREAM,
+        topic=ZULIP_TOPIC,
+        initial_comment=format_new_erg_data_summary(
+            df,
+            athletes,
+            cache_dir,
+            erg_types,
+            require_trainer,
+            load_erg_plot_last_run(cache_dir),
+            suunto_cfg=suunto_cfg,
+        ),
+    ):
+        return _kde_reply(problems, KDE_POST_FAILED)
+    suunto_keys = {
+        str(k) for k in df.get("suunto_key", pd.Series(dtype=str)).dropna() if str(k)
+    }
+    activity_ids: Set[int] = set()
+    if "activity_id" in df.columns:
+        activity_ids = {int(aid) for aid in df["activity_id"].dropna().unique()}
+    save_erg_plot_last_run(
+        cache_dir,
+        datetime.now(timezone.utc),
+        activity_ids,
+        suunto_keys=suunto_keys,
+    )
+    return _kde_reply(problems, KDE_POSTED)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Strava erg split vs HR (cached).")
     parser.add_argument(

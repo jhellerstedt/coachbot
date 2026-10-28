@@ -50,6 +50,14 @@ from erg_prescription_compare import (
     prescribed_erg_section_for_log,
 )
 
+from coach_bot.commands import (
+    KDE_BUSY,
+    KDE_NOTICE,
+    finish_kde_refresh,
+    help_text,
+    match_action_command,
+    try_begin_kde_refresh,
+)
 from coach_bot.config import (
     CoachAthleteCfg,
     format_profile_update_confirmation,
@@ -196,6 +204,11 @@ class CoachMessageHandler:
             return None
         body = strip_zulip_mentions(strip_upload_markdown(raw))
         ref = self._reference_local_datetime(message)
+        command_reply = self._maybe_action_command(
+            body, message, private_dm=is_private
+        )
+        if command_reply is not None:
+            return command_reply
 
         if is_private:
             if image_urls:
@@ -1000,7 +1013,11 @@ class CoachMessageHandler:
         return config_maintenance_enabled(get_config_path())
 
     def _post_syncing_notice(
-        self, message: Dict[str, Any], *, private_dm: bool
+        self,
+        message: Dict[str, Any],
+        *,
+        private_dm: bool,
+        content: str = SYNCING_NOTICE,
     ) -> None:
         if not self.zulip_client:
             return
@@ -1012,7 +1029,7 @@ class CoachMessageHandler:
                 payload = {
                     "type": "private",
                     "to": [int(sender_id)],
-                    "content": SYNCING_NOTICE,
+                    "content": content,
                 }
             else:
                 stream = message.get("display_recipient") or self.zulip_stream
@@ -1021,11 +1038,55 @@ class CoachMessageHandler:
                     "type": "stream",
                     "to": stream,
                     "topic": topic,
-                    "content": SYNCING_NOTICE,
+                    "content": content,
                 }
             self.zulip_client.send_message(payload)
         except Exception as exc:
             print(f"Zulip sync notice failed: {exc}", flush=True)
+
+    def _maybe_action_command(
+        self,
+        body: str,
+        message: Dict[str, Any],
+        *,
+        private_dm: bool,
+    ) -> Optional[str]:
+        """Handle help and kde before logs, maintenance, and model calls."""
+        if not body:
+            return None
+        if not private_dm and not self.bot_mentioned(message):
+            return None
+        command = match_action_command(body)
+        if command is None:
+            return None
+        athlete = self._resolve_athlete(message)
+        if athlete is None:
+            sender_id = message.get("sender_id")
+            return format_unmatched_sender_help(
+                sender_email=str(message.get("sender_email") or ""),
+                sender_full_name=str(message.get("sender_full_name") or ""),
+                sender_id=int(sender_id) if sender_id is not None else None,
+            )
+        if command == "help":
+            return help_text()
+        if not try_begin_kde_refresh():
+            return KDE_BUSY
+        try:
+            self._post_syncing_notice(
+                message, private_dm=private_dm, content=KDE_NOTICE
+            )
+            try:
+                from strava_erg_hr_plot import refresh_kde_plot
+
+                return refresh_kde_plot(get_config_path())
+            except Exception as exc:
+                print(
+                    f"KDE refresh failed: {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                return f"KDE refresh failed: {exc}"
+        finally:
+            finish_kde_refresh()
 
     def _maybe_maintenance_reply(
         self,

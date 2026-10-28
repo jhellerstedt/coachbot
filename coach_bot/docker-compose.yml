@@ -27,3 +27,5 @@ services:
       # Host cron already has these. The bot syncs one athlete in maintenance mode.
       - ${SUUNTOOL_BIN:-../bin/suuntool}:/usr/local/bin/suuntool:ro
       - ${SUUNTOOL_SESSION:-${HOME}/.config/suuntool/session.json}:/suunto/session.json:ro
+      # config token_dir ../lighties resolves to /lighties when config.yaml is /app/config.yaml.
+      - ${STRAVA_TOKEN_DIR:-../lighties}:/lighties:ro
