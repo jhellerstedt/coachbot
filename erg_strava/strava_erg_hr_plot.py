@@ -1740,26 +1740,37 @@ def _format_split_seconds_mmss(sec: float, _pos: Optional[int] = None) -> str:
     return f"{m}:{s:04.1f}"
 
 
-def _power_xlim(watts: pd.Series) -> Tuple[float, float]:
-    """Shared watt limits with higher power on the left, matching fast splits."""
-    from bike_power import split_seconds_to_watts
+# Half-width of each shared axis, in standard deviations of the KDE.
+KDE_VIEW_N_STD = 1.5
 
-    values = pd.to_numeric(watts, errors="coerce").dropna()
-    slow_w = split_seconds_to_watts(SPLIT_500_MAX_DISPLAY_SEC)
-    fast_w = split_seconds_to_watts(float(SPLIT_500_MIN_DISPLAY_SEC))
-    if values.empty:
-        return fast_w, slow_w
-    values = values[(values >= slow_w * 0.5) & (values <= fast_w * 1.05)]
-    if values.empty:
-        return fast_w, slow_w
-    hi = min(float(values.max()), fast_w)
-    lo = max(float(values.min()), slow_w * 0.5)
-    pad = (hi - lo) * 0.05 + 5.0
-    left = min(hi + pad, fast_w * 1.05)
-    right = max(lo - pad, 40.0)
-    if left <= right:
-        left, right = fast_w, slow_w
-    return left, right
+
+def kde_view_limits(
+    values: pd.Series,
+    n_std: float = KDE_VIEW_N_STD,
+) -> Tuple[float, float]:
+    """Window centered on the Gaussian KDE mean, ``n_std`` on either side.
+
+    The KDE mean is the sample mean. Its standard deviation is the sample
+    spread plus the kernel variance, which is the variance of the density.
+    """
+    from scipy.stats import gaussian_kde
+
+    arr = pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return 0.0, 1.0
+    mean = float(arr.mean())
+    if arr.size < 2 or float(arr.var()) == 0.0:
+        pad = max(abs(mean) * 0.05, 1.0)
+        return mean - pad, mean + pad
+    try:
+        kernel_var = float(np.asarray(gaussian_kde(arr).covariance).reshape(-1)[0])
+    except np.linalg.LinAlgError:
+        kernel_var = 0.0
+    spread = float(np.sqrt(float(arr.var(ddof=0)) + max(kernel_var, 0.0)))
+    if not np.isfinite(spread) or spread <= 0.0:
+        spread = max(abs(mean) * 0.05, 1.0)
+    return mean - n_std * spread, mean + n_std * spread
 
 
 def plot_three_panels(
@@ -1800,25 +1811,32 @@ def plot_three_panels(
         (erg_df, "watts", "Erg"),
         (bike_df, "watts", "Bike"),
     )
-    hr_parts = []
-    if not erg_df.empty:
-        hr_parts.append(erg_df["hr"].astype(float))
-    if not bike_df.empty and "hr" in bike_df.columns:
-        hr_parts.append(bike_df["hr"].astype(float))
-    y_all = pd.concat(hr_parts, ignore_index=True) if hr_parts else pd.Series(dtype=float)
-    if y_all.empty:
-        ymin, ymax = 80.0, 180.0
-    else:
-        ymax, ymin = float(y_all.max()), float(y_all.min())
-    pad_y = (ymax - ymin) * 0.05 + 1.0
-    watt_parts = []
-    if not erg_df.empty and "watts" in erg_df.columns:
-        watt_parts.append(erg_df["watts"])
-    if not bike_df.empty and "watts" in bike_df.columns:
-        watt_parts.append(bike_df["watts"])
-    x_left, x_right = _power_xlim(
-        pd.concat(watt_parts, ignore_index=True) if watt_parts else pd.Series(dtype=float)
-    )
+
+    def _on_plot(frame: pd.DataFrame) -> pd.DataFrame:
+        if frame.empty or "activity_start" not in frame.columns:
+            return frame
+        shown = (
+            subplot_mask(frame, "historical", now)
+            | subplot_mask(frame, "six_months", now)
+            | subplot_mask(frame, "one_month", now)
+        )
+        return frame.loc[shown]
+
+    def _column(frames: List[pd.DataFrame], column: str) -> pd.Series:
+        parts = [
+            pd.to_numeric(frame[column], errors="coerce")
+            for frame in frames
+            if not frame.empty and column in frame.columns
+        ]
+        if not parts:
+            return pd.Series(dtype=float)
+        return pd.concat(parts, ignore_index=True)
+
+    shown_frames = [_on_plot(erg_df), _on_plot(bike_df)]
+    if all(frame.empty for frame in shown_frames):
+        shown_frames = [erg_df, bike_df]
+    y_lo, y_hi = kde_view_limits(_column(shown_frames, "hr"))
+    x_lo, x_hi = kde_view_limits(_column(shown_frames, "watts"))
 
     fig, axes = plt.subplots(
         2,
@@ -1926,8 +1944,9 @@ def plot_three_panels(
         axes[row_i, 0].set_ylabel(f"{row_name}\nHeart rate (bpm)")
 
     for ax in axes.ravel():
-        ax.set_xlim(x_left, x_right)
-        ax.set_ylim(ymin - pad_y, ymax + pad_y)
+        # High watts stay on the left so the 500 m split still reads fast-to-slow.
+        ax.set_xlim(x_hi, x_lo)
+        ax.set_ylim(y_lo, y_hi)
 
     plot_labels = athlete_labels_in_plot(df, athletes) if not df.empty else []
     if plot_labels:

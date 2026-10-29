@@ -70,6 +70,22 @@ def test_sync_keeps_only_hammerhead_srm_with_power(tmp_path: Path, monkeypatch):
     assert not (tmp_path / "athlete_7" / "bike_power" / "fits" / "other.fit").exists()
 
 
+def test_axis_window_is_one_and_a_half_std_around_the_kde_mean():
+    import numpy as np
+    from scipy.stats import gaussian_kde
+
+    from strava_erg_hr_plot import kde_view_limits
+
+    values = pd.Series(np.random.default_rng(1).normal(210.0, 20.0, size=500))
+    lo, hi = kde_view_limits(values)
+    arr = values.to_numpy()
+    kernel_var = float(np.asarray(gaussian_kde(arr).covariance).reshape(-1)[0])
+    spread = float(np.sqrt(arr.var(ddof=0) + kernel_var))
+    mean = float(arr.mean())
+    assert lo == pytest.approx(mean - 1.5 * spread)
+    assert hi == pytest.approx(mean + 1.5 * spread)
+
+
 def test_plot_rows_share_the_power_axis(tmp_path: Path, monkeypatch):
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -113,7 +129,20 @@ def test_plot_rows_share_the_power_axis(tmp_path: Path, monkeypatch):
     assert figures, "plot did not build a figure"
     _fig, axes = figures[0]
     assert axes.shape == (2, 3)
-    assert axes[0, 0].get_shared_x_axes().joined(axes[0, 0], axes[1, 0])
+    from bike_power import add_concept2_watts
+    from strava_erg_hr_plot import kde_view_limits
+
+    watts = pd.concat(
+        [add_concept2_watts(erg)["watts"], bike["watts"]], ignore_index=True
+    )
+    hrs = pd.concat([erg["hr"], bike["hr"]], ignore_index=True)
+    x_lo, x_hi = kde_view_limits(watts)
+    y_lo, y_hi = kde_view_limits(hrs)
+    for ax in axes.ravel():
+        assert ax.get_shared_x_axes().joined(ax, axes[0, 0])
+        assert ax.get_shared_y_axes().joined(ax, axes[0, 0])
+        assert ax.get_xlim() == pytest.approx((x_hi, x_lo))
+        assert ax.get_ylim() == pytest.approx((y_lo, y_hi))
     top_labels = [ax.get_xlabel() for ax in axes[0, 0].child_axes]
     assert any("500 m split" in label for label in top_labels)
     plt.close("all")
